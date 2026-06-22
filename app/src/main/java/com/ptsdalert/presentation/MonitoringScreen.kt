@@ -23,9 +23,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ptsdalert.DeviceProvider
 import com.ptsdalert.domain.model.ArousalState
+import com.ptsdalert.infrastructure.alert.AlertManager
 import com.ptsdalert.infrastructure.simulator.SimulatorMode
 
 // WHY does this screen have zero hardware knowledge?
@@ -46,7 +48,10 @@ fun MonitoringScreen(
     // We pass MonitoringViewModelFactory so the framework can inject WearableDataSource
     // into the ViewModel constructor (no DI framework needed).
     viewModel: MonitoringViewModel = viewModel(
-        factory = MonitoringViewModelFactory(DeviceProvider.create())
+        factory = MonitoringViewModelFactory(
+            DeviceProvider.create(),
+            AlertManager(LocalContext.current.applicationContext)
+        )
     )
 ) {
     // WHY `collectAsState()`?
