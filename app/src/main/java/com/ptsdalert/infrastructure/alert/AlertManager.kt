@@ -22,7 +22,8 @@ const val ACTION_DISMISS = "com.ptsdalert.ACTION_DISMISS"
 
 class AlertManager(private val context: Context) {
 
-    private var alertJob: Job? = null
+    // Coroutine only for sound scheduling — vibration is OS-managed (see below).
+    private var soundJob: Job? = null
 
     private val vibrator: Vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
@@ -37,11 +38,18 @@ class AlertManager(private val context: Context) {
     fun startAlerts(state: ArousalState, scope: CoroutineScope) {
         stopAlerts()
         postNotification(state)
-        alertJob = scope.launch {
+
+        // Waveform: wait 3500 ms (off), buzz 500 ms (on), repeat from index 0 → 4 s cycle.
+        // Delegated to VibratorService (runs in system_server, not this process), so it fires
+        // reliably even when the screen is locked and Doze throttles the app.
+        vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(3500L, 500L), 0))
+
+        // Sound runs in-process — Doze may defer it while locked.
+        // Needs a ForegroundService to be fully reliable on a locked screen.
+        soundJob = scope.launch {
             var count = 0
             while (true) {
                 delay(4_000L)
-                vibrate()
                 count++
                 if (count % 3 == 0) playAlertSound()
             }
@@ -49,18 +57,10 @@ class AlertManager(private val context: Context) {
     }
 
     fun stopAlerts() {
-        alertJob?.cancel()
-        alertJob = null
+        soundJob?.cancel()
+        soundJob = null
+        vibrator.cancel()
         cancelNotification()
-    }
-
-    private fun vibrate() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            vibrator.vibrate(VibrationEffect.createOneShot(500, VibrationEffect.DEFAULT_AMPLITUDE))
-        } else {
-            @Suppress("DEPRECATION")
-            vibrator.vibrate(500)
-        }
     }
 
     private fun playAlertSound() {
