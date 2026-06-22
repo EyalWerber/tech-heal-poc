@@ -39,10 +39,10 @@ class AlertManager(private val context: Context) {
         stopAlerts()
         postNotification(state)
 
-        // Waveform: wait 3500 ms (off), buzz 500 ms (on), repeat from index 0 → 4 s cycle.
-        // Delegated to VibratorService (runs in system_server, not this process), so it fires
-        // reliably even when the screen is locked and Doze throttles the app.
-        vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(3500L, 500L), 0))
+        // Waveform: [0ms off, 500ms on, 3500ms off], repeat from index 0.
+        // Starts buzzing immediately, then every 4 s.
+        // Delegated to VibratorService (system_server) — fires even when screen is locked.
+        vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(0L, 500L, 3500L), 0))
 
         // Sound runs in-process — Doze may defer it while locked.
         // Needs a ForegroundService to be fully reliable on a locked screen.
