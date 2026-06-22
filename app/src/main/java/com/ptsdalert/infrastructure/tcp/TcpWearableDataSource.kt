@@ -2,6 +2,7 @@ package com.ptsdalert.infrastructure.tcp
 
 import com.ptsdalert.domain.model.PhysiologicalSample
 import com.ptsdalert.domain.ports.WearableDataSource
+import com.ptsdalert.infrastructure.logging.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -12,14 +13,11 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.Socket
 
-// Connects to a TCP server on the host machine (10.0.2.2 is the emulator's alias for localhost)
-// and reads newline-delimited JSON samples sent by the Python script.
-//
-// JSON format expected from Python:
-//   {"timestamp": 1234567890, "heart_rate": 80, "hrv": 40.0, "skin_temperature": 36.6, "stress_score": 30}
+private const val TAG = "TcpWearableDataSource"
+
 class TcpWearableDataSource(
     // private val host: String = "10.0.2.2", // emulator: host machine alias
-    private val host: String = "127.0.0.1",   // physical device: use `adb reverse tcp:9999 tcp:9999` to tunnel via USB
+    private val host: String = "127.0.0.1",   // physical device: `adb reverse tcp:9999 tcp:9999`
     private val port: Int = 9999
 ) : WearableDataSource {
 
@@ -28,7 +26,9 @@ class TcpWearableDataSource(
     override fun streamSamples(): Flow<PhysiologicalSample> = flow {
         while (true) {
             try {
+                AppLogger.i(TAG, "Connecting to $host:$port")
                 Socket(host, port).use { socket ->
+                    AppLogger.i(TAG, "Connected to $host:$port")
                     val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
                     var line = reader.readLine()
                     while (line != null) {
@@ -36,9 +36,10 @@ class TcpWearableDataSource(
                         if (sample != null) emit(sample)
                         line = reader.readLine()
                     }
+                    AppLogger.w(TAG, "Server closed connection — will retry")
                 }
             } catch (e: Exception) {
-                // Server not running yet — retry after 2 seconds
+                AppLogger.e(TAG, "Connection error: ${e.message} — retrying in 2s")
                 delay(2_000L)
             }
         }
@@ -54,6 +55,7 @@ class TcpWearableDataSource(
             stressScore     = obj.optInt("stress_score").takeIf { obj.has("stress_score") }
         )
     } catch (e: Exception) {
+        AppLogger.e(TAG, "Failed to parse sample: $json — ${e.message}")
         null
     }
 }

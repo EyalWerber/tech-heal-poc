@@ -8,6 +8,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import com.ptsdalert.domain.model.ArousalState
+import com.ptsdalert.infrastructure.logging.AppLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -15,6 +16,8 @@ import kotlinx.coroutines.launch
 
 const val CHANNEL_ID = "PTSD_ALERT_CHANNEL"
 const val ACTION_DISMISS = "com.ptsdalert.ACTION_DISMISS"
+
+private const val TAG = "AlertManager"
 
 class AlertManager(private val context: Context) {
 
@@ -29,9 +32,8 @@ class AlertManager(private val context: Context) {
 
     fun startAlerts(state: ArousalState, scope: CoroutineScope) {
         stopAlerts()
+        AppLogger.i(TAG, "Alert started: $state")
 
-        // ForegroundService keeps the process out of Doze when screen is locked,
-        // and shows the alert notification on the lock screen.
         val intent = Intent(context, AlertService::class.java).apply {
             putExtra(AlertService.EXTRA_STATE, state.name)
         }
@@ -41,10 +43,8 @@ class AlertManager(private val context: Context) {
             context.startService(intent)
         }
 
-        // OS-managed repeating vibration — works even when screen is locked.
         vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(0L, 500L, 3500L), 0))
 
-        // Sound every 3rd vibration. Reliable now that the process won't be frozen.
         soundJob = scope.launch {
             var count = 0
             while (true) {
@@ -56,6 +56,7 @@ class AlertManager(private val context: Context) {
     }
 
     fun stopAlerts() {
+        if (soundJob != null) AppLogger.i(TAG, "Alert stopped")
         soundJob?.cancel()
         soundJob = null
         vibrator.cancel()
@@ -63,6 +64,7 @@ class AlertManager(private val context: Context) {
     }
 
     private fun playAlertSound() {
+        AppLogger.d(TAG, "Playing alert sound")
         val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
         RingtoneManager.getRingtone(context, uri)?.play()
     }

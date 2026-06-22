@@ -8,6 +8,7 @@ import com.ptsdalert.domain.ports.SimulatorControls
 import com.ptsdalert.domain.ports.WearableDataSource
 import com.ptsdalert.infrastructure.alert.AlertManager
 import com.ptsdalert.infrastructure.alert.DismissSignal
+import com.ptsdalert.infrastructure.logging.AppLogger
 import com.ptsdalert.infrastructure.simulator.SimulatorMode
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -17,9 +18,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-// How long a new state must hold before we fire an alert.
-// Prevents alert spam when HR fluctuates on the threshold boundary.
 private const val STATE_DEBOUNCE_MS = 5_000L
+private const val TAG = "MonitoringViewModel"
 
 class MonitoringViewModel(
     private val wearableDataSource: WearableDataSource,
@@ -41,11 +41,18 @@ class MonitoringViewModel(
     private var pendingState: ArousalState? = null
 
     init {
+        AppLogger.i(TAG, "ViewModel created — source: ${wearableDataSource.deviceLabel}")
+
+        viewModelScope.launch {
+            AppLogger.observeRecent(50).collect { logs ->
+                _uiState.update { it.copy(recentLogs = logs) }
+            }
+        }
+
         viewModelScope.launch {
             DismissSignal.flow.collect {
+                AppLogger.i(TAG, "Dismiss received — stopping alerts for this episode")
                 alertManager.stopAlerts()
-                // Keep alertingState so the same episode doesn't re-fire.
-                // A genuine new transition will start a fresh debounce.
             }
         }
 
@@ -61,19 +68,16 @@ class MonitoringViewModel(
     }
 
     private fun handleStateTransition(newState: ArousalState) {
-        // Already committed to this state — nothing to do.
         if (newState == alertingState) {
             debounceJob?.cancel()
             pendingState = null
             return
         }
-
-        // Already waiting on this same pending transition — let the timer run.
         if (newState == pendingState) return
 
-        // New candidate state: restart the debounce timer.
         debounceJob?.cancel()
         pendingState = newState
+        AppLogger.d(TAG, "State candidate: $newState — debouncing ${STATE_DEBOUNCE_MS}ms")
 
         debounceJob = viewModelScope.launch {
             delay(STATE_DEBOUNCE_MS)
@@ -82,6 +86,7 @@ class MonitoringViewModel(
     }
 
     private fun commitTransition(state: ArousalState) {
+        AppLogger.i(TAG, "State committed: $state (held for ${STATE_DEBOUNCE_MS}ms)")
         alertingState = state
         pendingState = null
         when (state) {
@@ -95,6 +100,7 @@ class MonitoringViewModel(
     }
 
     override fun onCleared() {
+        AppLogger.i(TAG, "ViewModel cleared")
         super.onCleared()
         alertManager.stopAlerts()
     }

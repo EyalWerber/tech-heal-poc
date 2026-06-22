@@ -12,12 +12,16 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.app.ActivityCompat
 import com.ptsdalert.infrastructure.alert.CHANNEL_ID
+import com.ptsdalert.infrastructure.logging.AppLogger
+import com.ptsdalert.infrastructure.logging.sqlite.SqliteLogRepository
 import com.ptsdalert.presentation.MonitoringScreen
 import com.ptsdalert.ui.theme.PTSDAlertPOCTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppLogger.init(SqliteLogRepository(applicationContext))
+        AppLogger.i("MainActivity", "App started")
         createNotificationChannel()
         requestNotificationPermissionIfNeeded()
         enableEdgeToEdge()
