@@ -8,9 +8,9 @@ import com.ptsdalert.infrastructure.simulator.SimulatorMode
 // without knowing it's a simulator specifically.
 // Any future "demo mode" adapter can also implement this interface.
 //
-// NOTE: SimulatorMode is defined in infrastructure/simulator/ (Task 3).
-// This file will not compile until Task 3 creates SimulatorMode.
-// That is intentional — this is a forward reference.
+// NOTE: SimulatorMode is defined in infrastructure/simulator/ — the interface
+// deliberately depends on an infrastructure enum to keep the ViewModel's
+// setSimulatorMode() signature typed rather than using raw Strings.
 interface SimulatorControls {
     fun setMode(mode: SimulatorMode)
 }

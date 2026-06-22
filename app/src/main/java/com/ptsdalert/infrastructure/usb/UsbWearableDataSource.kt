@@ -30,9 +30,10 @@ class UsbWearableDataSource : WearableDataSource {
         TODO("USB serial integration not yet implemented")
     }
 
-    // Conversion layer placeholder — will parse USB JSON payloads into domain model.
-    // Future JSON shape: {"heartRate": 88, "stressScore": 30, "timestamp": 1718000000000}
+    // Conversion layer stub — shows the shape of JSON-to-domain mapping that will live here.
+    // The USB device sends: {"heartRate": 88, "stressScore": 30, "timestamp": 1718000000000}
+    @Suppress("unused")
     private fun parsePayload(json: String): PhysiologicalSample {
-        TODO("JSON parsing not yet implemented — add kotlinx.serialization when ready")
+        TODO("JSON parsing not yet implemented — add kotlinx.serialization and wire this into streamSamples() when ready")
     }
 }
