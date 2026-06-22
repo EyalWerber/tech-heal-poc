@@ -9,11 +9,17 @@ import com.ptsdalert.domain.ports.WearableDataSource
 import com.ptsdalert.infrastructure.alert.AlertManager
 import com.ptsdalert.infrastructure.alert.DismissSignal
 import com.ptsdalert.infrastructure.simulator.SimulatorMode
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+
+// How long a new state must hold before we fire an alert.
+// Prevents alert spam when HR fluctuates on the threshold boundary.
+private const val STATE_DEBOUNCE_MS = 5_000L
 
 class MonitoringViewModel(
     private val wearableDataSource: WearableDataSource,
@@ -30,18 +36,16 @@ class MonitoringViewModel(
     )
     val uiState: StateFlow<MonitoringUiState> = _uiState.asStateFlow()
 
-    // Tracks which state last triggered an alert (null = none active).
-    // Only transitions fire alerts; persistent same-state samples are ignored.
     private var alertingState: ArousalState? = null
-    // True after the user taps "I'm working out" for the current episode.
-    private var dismissedForEpisode: Boolean = false
+    private var debounceJob: Job? = null
+    private var pendingState: ArousalState? = null
 
     init {
-        // Listen for "I'm working out" dismissal from the notification.
         viewModelScope.launch {
             DismissSignal.flow.collect {
                 alertManager.stopAlerts()
-                dismissedForEpisode = true
+                // Keep alertingState so the same episode doesn't re-fire.
+                // A genuine new transition will start a fresh debounce.
             }
         }
 
@@ -57,15 +61,32 @@ class MonitoringViewModel(
     }
 
     private fun handleStateTransition(newState: ArousalState) {
-        if (newState == alertingState) return  // same episode, no change
+        // Already committed to this state — nothing to do.
+        if (newState == alertingState) {
+            debounceJob?.cancel()
+            pendingState = null
+            return
+        }
 
-        // New episode — reset per-episode dismissal regardless of direction.
-        dismissedForEpisode = false
-        alertingState = newState
+        // Already waiting on this same pending transition — let the timer run.
+        if (newState == pendingState) return
 
-        when (newState) {
+        // New candidate state: restart the debounce timer.
+        debounceJob?.cancel()
+        pendingState = newState
+
+        debounceJob = viewModelScope.launch {
+            delay(STATE_DEBOUNCE_MS)
+            commitTransition(newState)
+        }
+    }
+
+    private fun commitTransition(state: ArousalState) {
+        alertingState = state
+        pendingState = null
+        when (state) {
             ArousalState.NORMAL -> alertManager.stopAlerts()
-            else -> alertManager.startAlerts(newState, viewModelScope)
+            else -> alertManager.startAlerts(state, viewModelScope)
         }
     }
 
