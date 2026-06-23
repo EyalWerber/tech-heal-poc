@@ -29,4 +29,8 @@ kotlin {
 dependencies {
     implementation(libs.play.services.wearable)
     implementation(libs.health.services.client)
+    implementation(libs.guava)
+    // Compose runtime required by kotlin.compose plugin (pre-existing scaffold constraint)
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.compose.ui)
 }
