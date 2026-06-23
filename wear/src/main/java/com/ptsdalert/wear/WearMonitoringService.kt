@@ -78,8 +78,13 @@ class WearMonitoringService : Service() {
             Log.d(TAG, "Availability: $dataType=$availability")
         }
         override fun onRegistered() {
-            startExercise()
-            startWatchdog()
+            // End any orphaned session from a previous run before starting fresh.
+            HealthServices.getClient(applicationContext).exerciseClient
+                .endExerciseAsync()
+                .addListener({
+                    startExercise()
+                    startWatchdog()
+                }, executor)
         }
         override fun onRegistrationFailed(throwable: Throwable) {
             Log.e(TAG, "Exercise callback registration failed: ${throwable.message}")
