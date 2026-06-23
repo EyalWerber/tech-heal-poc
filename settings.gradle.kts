@@ -24,3 +24,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "PTSD Alert POC"
 include(":app")
+include(":wear")

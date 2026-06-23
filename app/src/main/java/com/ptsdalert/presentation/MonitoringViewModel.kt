@@ -6,6 +6,7 @@ import com.ptsdalert.domain.detection.DetectionEngine
 import com.ptsdalert.domain.model.ArousalState
 import com.ptsdalert.domain.ports.SimulatorControls
 import com.ptsdalert.domain.ports.WearableDataSource
+import com.ptsdalert.infrastructure.bluetooth.BleScannable
 import com.ptsdalert.infrastructure.alert.AlertManager
 import com.ptsdalert.infrastructure.alert.DismissSignal
 import com.ptsdalert.infrastructure.logging.AppLogger
@@ -27,6 +28,7 @@ class MonitoringViewModel(
 ) : ViewModel() {
 
     private val simulatorControls: SimulatorControls? = wearableDataSource as? SimulatorControls
+    private val bleScanner: BleScannable? = wearableDataSource as? BleScannable
 
     private val _uiState = MutableStateFlow(
         MonitoringUiState(
@@ -65,6 +67,15 @@ class MonitoringViewModel(
                 handleStateTransition(state)
             }
         }
+
+        bleScanner?.let { scanner ->
+            _uiState.update { it.copy(bleScanning = true) }
+            viewModelScope.launch {
+                scanner.scanDevices().collect { devices ->
+                    _uiState.update { it.copy(bleDevices = devices, bleScanning = true) }
+                }
+            }
+        }
     }
 
     private fun handleStateTransition(newState: ArousalState) {
@@ -97,6 +108,11 @@ class MonitoringViewModel(
 
     fun setSimulatorMode(mode: SimulatorMode) {
         simulatorControls?.setMode(mode)
+    }
+
+    fun onDeviceSelected(address: String) {
+        bleScanner?.connectToDevice(address)
+        _uiState.update { it.copy(bleDevices = emptyList(), bleScanning = false) }
     }
 
     override fun onCleared() {
