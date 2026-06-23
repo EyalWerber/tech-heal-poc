@@ -7,6 +7,7 @@ import com.ptsdalert.infrastructure.polar.PolarWearableDataSource
 import com.ptsdalert.infrastructure.simulator.SimulatorWearableDataSource
 import com.ptsdalert.infrastructure.tcp.TcpWearableDataSource
 import com.ptsdalert.infrastructure.usb.UsbWearableDataSource
+import com.ptsdalert.infrastructure.wearos.WearOsWearableDataSource
 
 // FACTORY — the ONE place in the entire app that knows about concrete adapters.
 // Change `activeDevice` to swap the hardware source. Nothing else needs to change.
@@ -33,5 +34,6 @@ object DeviceProvider {
         DeviceType.USB        -> UsbWearableDataSource()
         DeviceType.GARMIN     -> GarminWearableDataSource()
         DeviceType.POLAR      -> PolarWearableDataSource()
+        DeviceType.WEAR_OS    -> WearOsWearableDataSource()
     }
 }
