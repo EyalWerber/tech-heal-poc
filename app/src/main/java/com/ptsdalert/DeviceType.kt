@@ -5,6 +5,7 @@ package com.ptsdalert
 enum class DeviceType {
     SIMULATOR,
     BLUETOOTH,
+    TCP,
     USB,
     GARMIN,
     POLAR
