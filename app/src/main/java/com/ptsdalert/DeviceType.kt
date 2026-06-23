@@ -8,5 +8,6 @@ enum class DeviceType {
     TCP,
     USB,
     GARMIN,
-    POLAR
+    POLAR,
+    WEAR_OS
 }
