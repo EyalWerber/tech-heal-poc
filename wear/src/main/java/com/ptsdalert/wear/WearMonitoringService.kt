@@ -114,7 +114,6 @@ class WearMonitoringService : Service() {
             .also { it.acquire() }
 
         setupBleGattServer()
-        startBleAdvertising()
 
         HealthServices.getClient(this).measureClient
             .registerMeasureCallback(DataType.HEART_RATE_BPM, executor, measureCallback)
@@ -122,11 +121,19 @@ class WearMonitoringService : Service() {
         Log.i(TAG, "Service started — measuring HR + HRV")
     }
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_START_BROADCAST -> startBleAdvertising()
+            ACTION_STOP_BROADCAST  -> stopBleAdvertising()
+        }
+        return START_STICKY
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
         super.onDestroy()
-        bluetoothManager.adapter.bluetoothLeAdvertiser?.stopAdvertising(advertiseCallback)
+        stopBleAdvertising()
         gattServer?.close()
         HealthServices.getClient(this).measureClient
             .unregisterMeasureCallbackAsync(DataType.HEART_RATE_BPM, measureCallback)
@@ -179,6 +186,13 @@ class WearMonitoringService : Service() {
             .addServiceUuid(ParcelUuid(HR_SERVICE_UUID))
             .setIncludeDeviceName(false).build()
         advertiser.startAdvertising(settings, data, advertiseCallback)
+        Log.i(TAG, "Broadcasting started")
+    }
+
+    private fun stopBleAdvertising() {
+        bluetoothManager.adapter.bluetoothLeAdvertiser?.stopAdvertising(advertiseCallback)
+        connectedDevices.clear()
+        Log.i(TAG, "Broadcasting stopped")
     }
 
     private fun notifyHr(hr: Int) {
@@ -219,6 +233,8 @@ class WearMonitoringService : Service() {
     companion object {
         private const val CHANNEL_ID = "wear_monitoring"
         private const val NOTIFICATION_ID = 1001
+        const val ACTION_START_BROADCAST = "com.ptsdalert.wear.START_BROADCAST"
+        const val ACTION_STOP_BROADCAST  = "com.ptsdalert.wear.STOP_BROADCAST"
         @Volatile var lastHr: Int? = null
         @Volatile var lastHrv: Double? = null
     }
