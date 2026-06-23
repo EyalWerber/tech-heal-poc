@@ -101,21 +101,28 @@ class WearMonitoringService : Service() {
             .addListener({ Log.i(TAG, "Exercise started") }, executor)
     }
 
-    // ExerciseClient can be throttled/ended by Wear OS in ambient/sleep mode.
-    // This watchdog detects a stall and restarts the session to resume HR delivery.
+    // When screen turns off, Wear OS switches ExerciseClient to batching mode
+    // (maxReportLatencyMs = Integer.MAX_VALUE), silently holding HR data forever.
+    // flushAsync() forces the batched data out. Restart only if flush doesn't help.
     private fun startWatchdog() {
         watchdogJob?.cancel(false)
         watchdogJob = scheduler.scheduleAtFixedRate({
             if (currentFakeHr != null) return@scheduleAtFixedRate
             val elapsed = System.currentTimeMillis() - lastHrUpdateMs
+            if (lastHrUpdateMs > 0 && elapsed > 5_000L) {
+                Log.w(TAG, "HR stalled ${elapsed}ms — flushing exercise client")
+                HealthServices.getClient(applicationContext).exerciseClient
+                    .flushAsync()
+                    .addListener({}, executor)
+            }
             if (lastHrUpdateMs > 0 && elapsed > HR_STALL_TIMEOUT_MS) {
-                Log.w(TAG, "HR stalled for ${elapsed}ms — restarting exercise")
+                Log.w(TAG, "HR stalled ${elapsed}ms after flush attempts — restarting exercise")
                 lastHrUpdateMs = System.currentTimeMillis()
                 HealthServices.getClient(applicationContext).exerciseClient
                     .endExerciseAsync()
                     .addListener({ startExercise() }, executor)
             }
-        }, 30, 30, TimeUnit.SECONDS)
+        }, 5, 5, TimeUnit.SECONDS)
     }
 
     private val gattServerCallback = object : BluetoothGattServerCallback() {
