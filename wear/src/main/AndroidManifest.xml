@@ -13,12 +13,7 @@
 
         <service
             android:name=".HealthDataService"
-            android:exported="true"
-            android:permission="android.permission.BIND_JOB_SERVICE">
-            <intent-filter>
-                <action android:name="com.google.android.gms.wearable.DATA_CHANGED" />
-            </intent-filter>
-        </service>
+            android:exported="true" />
 
     </application>
 

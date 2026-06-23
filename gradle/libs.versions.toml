@@ -36,6 +36,8 @@ play-services-wearable = { group = "com.google.android.gms", name = "play-servic
 health-services-client = { group = "androidx.health", name = "health-services-client", version.ref = "healthServicesClient" }
 guava = { group = "com.google.guava", name = "guava", version.ref = "guava" }
 
+json = { group = "org.json", name = "json", version = "20240303" }
+
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
