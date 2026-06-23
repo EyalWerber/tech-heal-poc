@@ -12,6 +12,7 @@ import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.ParcelUuid
 import com.ptsdalert.domain.model.PhysiologicalSample
@@ -60,6 +61,13 @@ class BluetoothWearableDataSource(private val context: Context) : WearableDataSo
                 AppLogger.e(TAG, "BLE scan failed: error $errorCode")
                 close(Exception("BLE scan failed: $errorCode"))
             }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED
+        ) {
+            AppLogger.w(TAG, "BLUETOOTH_SCAN not granted — scan skipped")
+            close()
+            return@callbackFlow
         }
         val scanner = bluetoothAdapter.bluetoothLeScanner
             ?: run { close(Exception("Bluetooth unavailable or disabled")); return@callbackFlow }

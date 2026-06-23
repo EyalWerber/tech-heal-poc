@@ -13,7 +13,7 @@ import com.ptsdalert.infrastructure.wearos.WearOsWearableDataSource
 object DeviceProvider {
 
     // ← CHANGE THIS LINE to switch wearable adapters.
-    val activeDevice: DeviceType = DeviceType.BLUETOOTH
+    val activeDevice: DeviceType = DeviceType.WEAR_OS
 
     private lateinit var appContext: Context
 

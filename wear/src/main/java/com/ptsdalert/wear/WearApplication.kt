@@ -15,7 +15,7 @@ class WearApplication : Application() {
         registerPassiveListener()
     }
 
-    private fun registerPassiveListener() {
+    fun registerPassiveListener() {
         val client = HealthServices.getClient(this).passiveMonitoringClient
         val config = PassiveListenerConfig.builder()
             .setDataTypes(setOf(DataType.HEART_RATE_BPM))

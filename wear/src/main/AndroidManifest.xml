@@ -4,6 +4,8 @@
     <uses-feature android:name="android.hardware.type.watch" />
 
     <uses-permission android:name="android.permission.BODY_SENSORS" />
+    <uses-permission android:name="android.permission.BODY_SENSORS_BACKGROUND" />
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
     <uses-permission android:name="android.permission.INTERNET" />
 
     <application
@@ -11,9 +13,22 @@
         android:label="PTSD Alert Watch"
         android:theme="@android:style/Theme.DeviceDefault">
 
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".HealthDataService"
-            android:exported="true" />
+            android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.health.services.client.PASSIVE_LISTENER" />
+            </intent-filter>
+        </service>
 
     </application>
 
