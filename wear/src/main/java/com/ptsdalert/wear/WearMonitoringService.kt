@@ -36,6 +36,8 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
+private const val HR_STALL_TIMEOUT_MS = 30_000L
+
 private const val TAG = "WearMonitoringService"
 
 private val HR_SERVICE_UUID = UUID.fromString("0000180d-0000-1000-8000-00805f9b34fb")
@@ -48,7 +50,9 @@ class WearMonitoringService : Service() {
     private val executor = Executors.newSingleThreadExecutor()
     private val scheduler = Executors.newSingleThreadScheduledExecutor()
     private var fakeHrJob: ScheduledFuture<*>? = null
+    private var watchdogJob: ScheduledFuture<*>? = null
     @Volatile private var currentFakeHr: Int? = null
+    @Volatile private var lastHrUpdateMs: Long = 0L
     private var wakeLock: PowerManager.WakeLock? = null
 
     private lateinit var bluetoothManager: BluetoothManager
@@ -57,9 +61,15 @@ class WearMonitoringService : Service() {
 
     private val exerciseCallback = object : ExerciseUpdateCallback {
         override fun onExerciseUpdateReceived(update: ExerciseUpdate) {
+            if (update.exerciseStateInfo.state.isEnded) {
+                Log.w(TAG, "Exercise ended unexpectedly — restarting")
+                startExercise()
+                return
+            }
             if (currentFakeHr != null) return
             val hr = update.latestMetrics.getData(DataType.HEART_RATE_BPM)
                 .lastOrNull()?.value?.toInt() ?: return
+            lastHrUpdateMs = System.currentTimeMillis()
             Log.d(TAG, "HR=$hr — notifying BLE clients")
             notifyHr(hr)
         }
@@ -68,17 +78,39 @@ class WearMonitoringService : Service() {
             Log.d(TAG, "Availability: $dataType=$availability")
         }
         override fun onRegistered() {
-            val config = ExerciseConfig.builder(ExerciseType.WORKOUT)
-                .setDataTypes(setOf(DataType.HEART_RATE_BPM))
-                .setIsAutoPauseAndResumeEnabled(false)
-                .build()
-            HealthServices.getClient(applicationContext).exerciseClient
-                .startExerciseAsync(config)
-                .addListener({ Log.i(TAG, "Exercise started") }, executor)
+            startExercise()
+            startWatchdog()
         }
         override fun onRegistrationFailed(throwable: Throwable) {
             Log.e(TAG, "Exercise callback registration failed: ${throwable.message}")
         }
+    }
+
+    private fun startExercise() {
+        val config = ExerciseConfig.builder(ExerciseType.WORKOUT)
+            .setDataTypes(setOf(DataType.HEART_RATE_BPM))
+            .setIsAutoPauseAndResumeEnabled(false)
+            .build()
+        HealthServices.getClient(applicationContext).exerciseClient
+            .startExerciseAsync(config)
+            .addListener({ Log.i(TAG, "Exercise started") }, executor)
+    }
+
+    // ExerciseClient can be throttled/ended by Wear OS in ambient/sleep mode.
+    // This watchdog detects a stall and restarts the session to resume HR delivery.
+    private fun startWatchdog() {
+        watchdogJob?.cancel(false)
+        watchdogJob = scheduler.scheduleAtFixedRate({
+            if (currentFakeHr != null) return@scheduleAtFixedRate
+            val elapsed = System.currentTimeMillis() - lastHrUpdateMs
+            if (lastHrUpdateMs > 0 && elapsed > HR_STALL_TIMEOUT_MS) {
+                Log.w(TAG, "HR stalled for ${elapsed}ms — restarting exercise")
+                lastHrUpdateMs = System.currentTimeMillis()
+                HealthServices.getClient(applicationContext).exerciseClient
+                    .endExerciseAsync()
+                    .addListener({ startExercise() }, executor)
+            }
+        }, 30, 30, TimeUnit.SECONDS)
     }
 
     private val gattServerCallback = object : BluetoothGattServerCallback() {
@@ -159,6 +191,7 @@ class WearMonitoringService : Service() {
         bluetoothManager.adapter.bluetoothLeAdvertiser?.stopAdvertising(advertiseCallback)
         gattServer?.close()
         fakeHrJob?.cancel(false)
+        watchdogJob?.cancel(false)
         scheduler.shutdown()
         val client = HealthServices.getClient(applicationContext).exerciseClient
         client.endExerciseAsync().addListener({}, executor)
