@@ -2,6 +2,7 @@ package com.ptsdalert.wear
 
 import android.Manifest
 import android.app.Activity
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.widget.TextView
@@ -41,8 +42,7 @@ class MainActivity : Activity() {
         if (requestCode == 100) {
             if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
                 statusText.text = "PTSD Alert\nMonitoring active"
-                // Re-register passive listener now that permission is granted
-                (application as WearApplication).registerPassiveListener()
+                startService(Intent(this, WearMonitoringService::class.java))
             } else {
                 statusText.text = "PTSD Alert\nBody sensor permission denied"
             }
