@@ -44,6 +44,9 @@ private val CCCD_UUID        = UUID.fromString("00002902-0000-1000-8000-00805f9b
 class WearMonitoringService : Service() {
 
     private val executor = Executors.newSingleThreadExecutor()
+    private val scheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
+    private var fakeHrJob: java.util.concurrent.ScheduledFuture<*>? = null
+    @Volatile private var currentFakeHr: Int? = null
     private var wakeLock: PowerManager.WakeLock? = null
 
     private lateinit var bluetoothManager: BluetoothManager
@@ -57,6 +60,7 @@ class WearMonitoringService : Service() {
             Log.d(TAG, "$dataType availability: $availability")
         }
         override fun onDataReceived(data: DataPointContainer) {
+            if (currentFakeHr != null) return
             val hr = data.getData(DataType.HEART_RATE_BPM).lastOrNull()?.value?.toInt() ?: return
             val hrv = computeRmssd(hr)
             lastHr = hr
@@ -143,8 +147,32 @@ class WearMonitoringService : Service() {
         when (intent?.action) {
             ACTION_START_BROADCAST -> startBleAdvertising()
             ACTION_STOP_BROADCAST  -> stopBleAdvertising()
+            ACTION_FAKE_HR -> {
+                val bpm = intent.getIntExtra(EXTRA_FAKE_HR, 0)
+                if (bpm > 0) setFakeHr(bpm) else clearFakeHr()
+            }
         }
         return START_STICKY
+    }
+
+    private fun setFakeHr(bpm: Int) {
+        fakeHrJob?.cancel(false)
+        currentFakeHr = bpm
+        rrBuffer.clear()
+        fakeHrJob = scheduler.scheduleAtFixedRate({
+            notifyHr(bpm)
+            lastHr = bpm
+            lastHrv = null
+        }, 0, 1, java.util.concurrent.TimeUnit.SECONDS)
+        Log.i(TAG, "Fake HR: $bpm BPM")
+    }
+
+    private fun clearFakeHr() {
+        fakeHrJob?.cancel(false)
+        fakeHrJob = null
+        currentFakeHr = null
+        rrBuffer.clear()
+        Log.i(TAG, "Fake HR cleared — back to real HR")
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -156,6 +184,8 @@ class WearMonitoringService : Service() {
         HealthServices.getClient(this).measureClient
             .unregisterMeasureCallbackAsync(DataType.HEART_RATE_BPM, measureCallback)
         executor.shutdown()
+        fakeHrJob?.cancel(false)
+        scheduler.shutdown()
         wakeLock?.release()
     }
 
@@ -239,6 +269,8 @@ class WearMonitoringService : Service() {
         private const val NOTIFICATION_ID = 1001
         const val ACTION_START_BROADCAST = "com.ptsdalert.wear.START_BROADCAST"
         const val ACTION_STOP_BROADCAST  = "com.ptsdalert.wear.STOP_BROADCAST"
+        const val ACTION_FAKE_HR         = "com.ptsdalert.wear.FAKE_HR"
+        const val EXTRA_FAKE_HR          = "fake_hr"
         @Volatile var lastHr: Int? = null
         @Volatile var lastHrv: Double? = null
     }
