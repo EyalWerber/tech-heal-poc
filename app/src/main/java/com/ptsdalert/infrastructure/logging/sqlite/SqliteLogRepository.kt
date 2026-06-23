@@ -23,6 +23,7 @@ class SqliteLogRepository(context: Context) : LogRepository {
     override suspend fun insert(entry: LogEntry) = withContext(Dispatchers.IO) {
         db.insert(entry)
         _insertSignal.tryEmit(Unit)
+        Unit
     }
 
     override fun observeRecent(limit: Int): Flow<List<LogEntry>> = flow {

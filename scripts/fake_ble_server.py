@@ -22,7 +22,7 @@ import sys
 PORT = 9999
 INTERVAL = 1.0  # seconds between samples
 
-current_hr = 45  # starting heart rate
+current_hr = 72  # starting heart rate (normal range — avoids triggering an alert on connect)
 
 
 def hr_to_sample(hr: int) -> dict:

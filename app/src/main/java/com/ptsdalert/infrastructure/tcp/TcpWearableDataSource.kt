@@ -8,9 +8,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.CancellationException
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.io.IOException
 import java.net.Socket
 
 private const val TAG = "TcpWearableDataSource"
@@ -28,6 +30,7 @@ class TcpWearableDataSource(
             try {
                 AppLogger.i(TAG, "Connecting to $host:$port")
                 Socket(host, port).use { socket ->
+                    socket.soTimeout = 5_000
                     AppLogger.i(TAG, "Connected to $host:$port")
                     val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
                     var line = reader.readLine()
@@ -38,9 +41,11 @@ class TcpWearableDataSource(
                     }
                     AppLogger.w(TAG, "Server closed connection — will retry")
                 }
-            } catch (e: Exception) {
-                AppLogger.e(TAG, "Connection error: ${e.message} — retrying in 2s")
-                delay(2_000L)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: IOException) {
+                AppLogger.w(TAG, "Connection lost: ${e.message} — retrying in 1s")
+                delay(1_000L)
             }
         }
     }.flowOn(Dispatchers.IO)
