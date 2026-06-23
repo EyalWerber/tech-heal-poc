@@ -20,7 +20,7 @@ class MainActivity : Activity() {
     private val poller = object : Runnable {
         override fun run() {
             hrText.text = WearMonitoringService.lastHr?.let { "$it BPM" } ?: "-- BPM"
-            hrvText.text = "HRV --"
+            hrvText.text = WearMonitoringService.lastHrv?.let { "HRV ${"%.1f".format(it)} ms" } ?: "HRV --"
             handler.postDelayed(this, 1000)
         }
     }
@@ -51,7 +51,9 @@ class MainActivity : Activity() {
 
         val missing = arrayOf(
             Manifest.permission.BODY_SENSORS,
-            Manifest.permission.ACTIVITY_RECOGNITION
+            Manifest.permission.ACTIVITY_RECOGNITION,
+            Manifest.permission.BLUETOOTH_CONNECT,
+            Manifest.permission.BLUETOOTH_ADVERTISE
         ).filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
 
         if (missing.isNotEmpty()) {

@@ -32,9 +32,11 @@ import java.util.UUID
 
 private const val TAG = "BluetoothWearableDataSource"
 
-private val HR_SERVICE_UUID = UUID.fromString("0000180d-0000-1000-8000-00805f9b34fb")
-private val HR_CHAR_UUID    = UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb")
-private val CCCD_UUID       = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+private val HR_SERVICE_UUID  = UUID.fromString("0000180d-0000-1000-8000-00805f9b34fb")
+private val HR_CHAR_UUID     = UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb")
+private val HRV_SERVICE_UUID = UUID.fromString("0000fff0-0000-1000-8000-00805f9b34fb")
+private val HRV_CHAR_UUID    = UUID.fromString("0000fff1-0000-1000-8000-00805f9b34fb")
+private val CCCD_UUID        = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
 class BluetoothWearableDataSource(private val context: Context) : WearableDataSource, BleScannable {
 
@@ -118,6 +120,7 @@ class BluetoothWearableDataSource(private val context: Context) : WearableDataSo
     private fun gattStream(address: String): Flow<PhysiologicalSample> = callbackFlow {
         val device = bluetoothAdapter.getRemoteDevice(address)
         var gatt: BluetoothGatt? = null
+        var latestHrv: Double? = null
 
         val callback = object : BluetoothGattCallback() {
             override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
@@ -137,8 +140,60 @@ class BluetoothWearableDataSource(private val context: Context) : WearableDataSo
                 if (status != BluetoothGatt.GATT_SUCCESS) {
                     close(Exception("Service discovery failed: $status")); return
                 }
-                val char = g.getService(HR_SERVICE_UUID)?.getCharacteristic(HR_CHAR_UUID)
-                    ?: run { close(Exception("HR characteristic not found")); return }
+                enableNotifications(g, HR_SERVICE_UUID, HR_CHAR_UUID)
+            }
+
+            override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+                // After HR notifications enabled, enable HRV notifications
+                if (descriptor.characteristic.uuid == HR_CHAR_UUID) {
+                    enableNotifications(g, HRV_SERVICE_UUID, HRV_CHAR_UUID)
+                }
+            }
+
+            // Pixel Watch restarts its GATT server when the service changes.
+            override fun onServiceChanged(g: BluetoothGatt) {
+                AppLogger.w(TAG, "GATT service changed — re-discovering services")
+                g.discoverServices()
+            }
+
+            override fun onCharacteristicChanged(g: BluetoothGatt, char: BluetoothGattCharacteristic, value: ByteArray) {
+                handleChar(char.uuid, value)
+            }
+
+            @Suppress("DEPRECATION")
+            override fun onCharacteristicChanged(g: BluetoothGatt, char: BluetoothGattCharacteristic) {
+                handleChar(char.uuid, char.value)
+            }
+
+            private fun handleChar(uuid: UUID, value: ByteArray) {
+                when (uuid) {
+                    HR_CHAR_UUID -> {
+                        val hr = parseHrBytes(value) ?: return
+                        val hrv = latestHrv ?: deriveHrv(hr)
+                        trySend(PhysiologicalSample(
+                            timestamp       = System.currentTimeMillis(),
+                            heartRate       = hr,
+                            hrv             = hrv,
+                            skinTemperature = null,
+                            stressScore     = deriveStress(hr)
+                        ))
+                    }
+                    HRV_CHAR_UUID -> {
+                        if (value.size >= 2) {
+                            val tenths = ((value[1].toInt() and 0xFF) shl 8) or (value[0].toInt() and 0xFF)
+                            latestHrv = tenths / 10.0
+                            AppLogger.d(TAG, "HRV from watch: $latestHrv ms")
+                        }
+                    }
+                }
+            }
+
+            private fun enableNotifications(g: BluetoothGatt, serviceUuid: UUID, charUuid: UUID) {
+                val char = g.getService(serviceUuid)?.getCharacteristic(charUuid)
+                if (char == null) {
+                    AppLogger.w(TAG, "Characteristic $charUuid not found — skipping")
+                    return
+                }
                 g.setCharacteristicNotification(char, true)
                 val descriptor = char.getDescriptor(CCCD_UUID)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -149,25 +204,7 @@ class BluetoothWearableDataSource(private val context: Context) : WearableDataSo
                     @Suppress("DEPRECATION")
                     g.writeDescriptor(descriptor)
                 }
-                AppLogger.i(TAG, "HR notifications enabled on $address")
-            }
-
-            // Pixel Watch restarts its GATT server when ExerciseClient starts/stops.
-            // Without re-discovery here, notifications stop silently and HR freezes.
-            override fun onServiceChanged(g: BluetoothGatt) {
-                AppLogger.w(TAG, "GATT service changed — re-discovering services")
-                g.discoverServices()
-            }
-
-            // API 33+ callback
-            override fun onCharacteristicChanged(g: BluetoothGatt, char: BluetoothGattCharacteristic, value: ByteArray) {
-                parseSample(value)?.let { trySend(it) }
-            }
-
-            // Pre-API 33 callback
-            @Suppress("DEPRECATION")
-            override fun onCharacteristicChanged(g: BluetoothGatt, char: BluetoothGattCharacteristic) {
-                parseSample(char.value)?.let { trySend(it) }
+                AppLogger.i(TAG, "Notifications enabled for $charUuid")
             }
         }
 
@@ -177,16 +214,5 @@ class BluetoothWearableDataSource(private val context: Context) : WearableDataSo
             gatt?.disconnect()
             gatt?.close()
         }
-    }
-
-    private fun parseSample(bytes: ByteArray): PhysiologicalSample? {
-        val hr = parseHrBytes(bytes) ?: return null
-        return PhysiologicalSample(
-            timestamp       = System.currentTimeMillis(),
-            heartRate       = hr,
-            hrv             = deriveHrv(hr),
-            skinTemperature = null,
-            stressScore     = deriveStress(hr)
-        )
     }
 }
