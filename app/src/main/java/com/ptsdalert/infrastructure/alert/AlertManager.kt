@@ -19,7 +19,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-const val CHANNEL_ID = "PTSD_ALERT_CHANNEL"
+const val CHANNEL_ID = "PTSD_ALERT_V2"
 const val ACTION_DISMISS = "com.ptsdalert.ACTION_DISMISS"
 const val ALERT_NOTIFICATION_ID = 1002
 

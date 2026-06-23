@@ -68,15 +68,33 @@ class WearMonitoringService : Service() {
     }
 
     private fun computeRmssd(hr: Int): Double? {
+        if (hr <= 0) return null
         val rr = 60000.0 / hr
         rrBuffer.addLast(rr)
         if (rrBuffer.size > 10) rrBuffer.removeFirst()
         if (rrBuffer.size < 2) return null
         val squaredDiffs = rrBuffer.zipWithNext().map { (a, b) -> (b - a) * (b - a) }
-        return sqrt(squaredDiffs.average())
+        val result = sqrt(squaredDiffs.average())
+        return if (result.isFinite()) result else null
     }
 
     private val gattServerCallback = object : BluetoothGattServerCallback() {
+        override fun onServiceAdded(status: Int, service: BluetoothGattService) {
+            if (service.uuid == HR_SERVICE_UUID && status == BluetoothGatt.GATT_SUCCESS) {
+                val hrvChar = BluetoothGattCharacteristic(
+                    HRV_CHAR_UUID,
+                    BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+                    BluetoothGattCharacteristic.PERMISSION_READ
+                ).apply {
+                    addDescriptor(BluetoothGattDescriptor(CCCD_UUID,
+                        BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE))
+                }
+                gattServer?.addService(
+                    BluetoothGattService(HRV_SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY)
+                        .also { it.addCharacteristic(hrvChar) }
+                )
+            }
+        }
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 connectedDevices.add(device)
@@ -159,21 +177,7 @@ class WearMonitoringService : Service() {
                 .also { it.addCharacteristic(hrChar) }
         )
 
-        // HRV Service
-        val hrvChar = BluetoothGattCharacteristic(
-            HRV_CHAR_UUID,
-            BluetoothGattCharacteristic.PROPERTY_NOTIFY,
-            BluetoothGattCharacteristic.PERMISSION_READ
-        ).apply {
-            addDescriptor(BluetoothGattDescriptor(CCCD_UUID,
-                BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE))
-        }
-        gattServer?.addService(
-            BluetoothGattService(HRV_SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY)
-                .also { it.addCharacteristic(hrvChar) }
-        )
-
-        Log.i(TAG, "GATT server set up with HR + HRV services")
+        Log.i(TAG, "GATT server set up — HRV service added after HR confirmed")
     }
 
     private fun startBleAdvertising() {
