@@ -4,7 +4,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.media.RingtoneManager
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -27,6 +28,7 @@ private const val TAG = "AlertManager"
 class AlertManager(private val context: Context) {
 
     private var soundJob: Job? = null
+    private var toneGenerator: ToneGenerator? = null
 
     private val vibrator: Vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
@@ -60,6 +62,9 @@ class AlertManager(private val context: Context) {
         if (soundJob != null) AppLogger.i(TAG, "Alert stopped")
         soundJob?.cancel()
         soundJob = null
+        toneGenerator?.stopTone()
+        toneGenerator?.release()
+        toneGenerator = null
         vibrator.cancel()
         NotificationManagerCompat.from(context).cancel(ALERT_NOTIFICATION_ID)
         updateService(ArousalState.NORMAL)
@@ -112,10 +117,10 @@ class AlertManager(private val context: Context) {
     }
 
     private fun playAlertSound() {
-        AppLogger.d(TAG, "Playing alert sound")
-        // TYPE_ALARM bypasses silent mode and DND — same stream as clock alarms.
-        val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-        RingtoneManager.getRingtone(context, uri)?.play()
+        AppLogger.d(TAG, "Playing beep alert")
+        if (toneGenerator == null) {
+            toneGenerator = ToneGenerator(AudioManager.STREAM_ALARM, 80)
+        }
+        toneGenerator?.startTone(ToneGenerator.TONE_PROP_BEEP2, 700)
     }
 }
