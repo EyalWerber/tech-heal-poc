@@ -1,6 +1,5 @@
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.compose)
 }
 
 android {
@@ -22,15 +21,14 @@ android {
 
 }
 
-kotlin {
-    jvmToolchain(11)
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
+    }
 }
 
 dependencies {
     implementation(libs.play.services.wearable)
     implementation(libs.health.services.client)
     implementation(libs.guava)
-    // Compose runtime required by kotlin.compose plugin (pre-existing scaffold constraint)
-    implementation(platform(libs.androidx.compose.bom))
-    implementation(libs.androidx.compose.ui)
 }
