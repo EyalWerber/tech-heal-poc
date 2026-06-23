@@ -90,7 +90,19 @@ fun MonitoringScreen(
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary
                 )
-                Spacer(modifier = Modifier.height(32.dp))
+                Spacer(modifier = Modifier.height(24.dp))
+                Text(
+                    text = "est. HRV",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = uiState.estimatedHrv?.let { "${"%.1f".format(it)} ms" } ?: "-- ms",
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.secondary
+                )
+                Spacer(modifier = Modifier.height(24.dp))
 
                 Text(
                     text = "State",

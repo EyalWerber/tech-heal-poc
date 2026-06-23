@@ -3,6 +3,7 @@ package com.ptsdalert.presentation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ptsdalert.domain.detection.DetectionEngine
+import com.ptsdalert.domain.detection.HrvCalculator
 import com.ptsdalert.domain.model.ArousalState
 import com.ptsdalert.domain.ports.SimulatorControls
 import com.ptsdalert.domain.ports.WearableDataSource
@@ -36,6 +37,7 @@ class MonitoringViewModel(
     )
     val uiState: StateFlow<MonitoringUiState> = _uiState.asStateFlow()
 
+    private val hrvCalculator = HrvCalculator()
     private var alertingState: ArousalState? = null
     private var debounceJob: Job? = null
     private var pendingState: ArousalState? = null
@@ -59,8 +61,9 @@ class MonitoringViewModel(
         viewModelScope.launch {
             wearableDataSource.streamSamples().collect { sample ->
                 val state = DetectionEngine.classify(sample)
+                val hrv = sample.heartRate?.let { hrvCalculator.addSample(it) }
                 _uiState.update { current ->
-                    current.copy(heartRate = sample.heartRate, arousalState = state)
+                    current.copy(heartRate = sample.heartRate, estimatedHrv = hrv, arousalState = state)
                 }
                 handleStateTransition(state)
             }
