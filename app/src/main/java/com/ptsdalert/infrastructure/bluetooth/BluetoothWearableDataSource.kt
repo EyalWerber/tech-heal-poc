@@ -152,6 +152,13 @@ class BluetoothWearableDataSource(private val context: Context) : WearableDataSo
                 AppLogger.i(TAG, "HR notifications enabled on $address")
             }
 
+            // Pixel Watch restarts its GATT server when ExerciseClient starts/stops.
+            // Without re-discovery here, notifications stop silently and HR freezes.
+            override fun onServiceChanged(g: BluetoothGatt) {
+                AppLogger.w(TAG, "GATT service changed — re-discovering services")
+                g.discoverServices()
+            }
+
             // API 33+ callback
             override fun onCharacteristicChanged(g: BluetoothGatt, char: BluetoothGattCharacteristic, value: ByteArray) {
                 parseSample(value)?.let { trySend(it) }
