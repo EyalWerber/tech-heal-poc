@@ -75,7 +75,14 @@ class MainActivity : ComponentActivity() {
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Alerts for hypo/hyperarousal state transitions"
-                setSound(null, null)
+                // USAGE_ALARM bypasses silent mode and DND — required for a safety alert app.
+                setSound(
+                    Settings.System.DEFAULT_ALARM_ALERT_URI,
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
             }
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             nm.createNotificationChannel(channel)

@@ -1,6 +1,7 @@
 package com.ptsdalert.presentation
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,13 +17,16 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -37,6 +41,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -45,12 +50,14 @@ import com.ptsdalert.domain.model.ArousalState
 import com.ptsdalert.domain.model.LogEntry
 import com.ptsdalert.domain.model.LogLevel
 import com.ptsdalert.infrastructure.alert.AlertManager
+import com.ptsdalert.infrastructure.bluetooth.BleDevice
 import com.ptsdalert.infrastructure.settings.SettingsRepository
 import com.ptsdalert.infrastructure.simulator.SimulatorMode
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MonitoringScreen(
     viewModel: MonitoringViewModel = viewModel(
@@ -62,6 +69,7 @@ fun MonitoringScreen(
     )
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showBaselineDialog by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -198,6 +206,20 @@ fun MonitoringScreen(
                 }
             }
         }
+
+        // ── BLE device picker sheet ────────────────────────────────────────
+        if (uiState.bleDevices.isNotEmpty()) {
+            ModalBottomSheet(
+                onDismissRequest = {},
+                sheetState = sheetState
+            ) {
+                BleDevicePicker(
+                    devices = uiState.bleDevices,
+                    scanning = uiState.bleScanning,
+                    onDeviceSelected = { viewModel.onDeviceSelected(it) }
+                )
+            }
+        }
     }
 
     // ── Baseline HRV dialog ────────────────────────────────────────────────
@@ -271,6 +293,57 @@ private fun BaselineHrvDialog(
             }
         }
     )
+}
+
+@Composable
+private fun BleDevicePicker(
+    devices: List<BleDevice>,
+    scanning: Boolean,
+    onDeviceSelected: (String) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp)
+    ) {
+        Text(
+            text = if (scanning) "Select your HR monitor (scanning…)" else "Select your HR monitor",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(bottom = 16.dp)
+        )
+        if (devices.isEmpty()) {
+            Text(
+                text = "No devices found yet. Make sure your device is nearby and on.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            devices.forEach { device ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onDeviceSelected(device.address) }
+                        .padding(vertical = 12.dp)
+                ) {
+                    Column {
+                        Text(
+                            text = device.name,
+                            style = MaterialTheme.typography.bodyLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = device.address,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                HorizontalDivider()
+            }
+        }
+        Spacer(modifier = Modifier.height(32.dp))
+    }
 }
 
 @Composable

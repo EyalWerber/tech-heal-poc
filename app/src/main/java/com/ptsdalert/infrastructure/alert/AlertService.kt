@@ -14,10 +14,18 @@ import com.google.android.gms.wearable.Wearable
 import com.ptsdalert.domain.model.ArousalState
 import com.ptsdalert.infrastructure.logging.AppLogger
 import com.ptsdalert.infrastructure.wearos.WearDataListenerService
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import java.net.ServerSocket
 
 class AlertService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
+    private val tcpScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private val wearMessageListener = MessageClient.OnMessageReceivedListener { event ->
         if (event.path == WearDataListenerService.MESSAGE_PATH) {
@@ -35,6 +43,36 @@ class AlertService : Service() {
             AppLogger.i(TAG, "WearOS MessageClient listener registered")
         } catch (e: Exception) {
             AppLogger.e(TAG, "Failed to register WearOS listener: ${e.message}")
+        }
+        startTcpServer()
+    }
+
+    private fun startTcpServer() {
+        tcpScope.launch {
+            try {
+                ServerSocket(TCP_PORT).use { server ->
+                    AppLogger.i(TAG, "Watch TCP server listening on port $TCP_PORT")
+                    while (isActive) {
+                        val socket = runCatching { server.accept() }.getOrNull() ?: break
+                        launch {
+                            runCatching {
+                                socket.use {
+                                    val json = it.getInputStream().bufferedReader().readLine()
+                                    if (json != null) {
+                                        val sample = WearDataListenerService.parseSample(json)
+                                        if (sample != null) {
+                                            WearDataListenerService.sampleFlow.tryEmit(sample)
+                                            AppLogger.d(TAG, "TCP sample received: HR=${sample.heartRate}")
+                                        }
+                                    }
+                                }
+                            }.onFailure { e -> AppLogger.e(TAG, "TCP client error: ${e.message}") }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "TCP server error: ${e.message}")
+            }
         }
     }
 
@@ -62,6 +100,7 @@ class AlertService : Service() {
 
     override fun onDestroy() {
         AppLogger.i(TAG, "Foreground service destroyed")
+        tcpScope.cancel()
         try {
             Wearable.getMessageClient(this).removeListener(wearMessageListener)
         } catch (e: Exception) {
@@ -133,5 +172,6 @@ class AlertService : Service() {
         private const val TAG = "AlertService"
         const val EXTRA_STATE = "state"
         const val NOTIFICATION_ID = 1001
+        const val TCP_PORT = 9998
     }
 }
