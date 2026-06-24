@@ -32,15 +32,6 @@
             android:exported="false"
             android:foregroundServiceType="health" />
 
-        <service
-            android:name=".HrPassiveListenerService"
-            android:exported="true"
-            android:permission="android.permission.BIND_PASSIVE_LISTENER_SERVICE">
-            <intent-filter>
-                <action android:name="androidx.health.services.client.PASSIVE_LISTENER" />
-            </intent-filter>
-        </service>
-
     </application>
 
 </manifest>

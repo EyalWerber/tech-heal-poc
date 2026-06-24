@@ -18,16 +18,15 @@ import android.bluetooth.le.AdvertiseCallback
 import android.bluetooth.le.AdvertiseData
 import android.bluetooth.le.AdvertiseSettings
 import android.content.Intent
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.os.Build
 import android.os.IBinder
 import android.os.ParcelUuid
 import android.os.PowerManager
 import android.util.Log
-import androidx.health.services.client.HealthServices
-import androidx.health.services.client.MeasureCallback
-import androidx.health.services.client.data.Availability
-import androidx.health.services.client.data.DataPointContainer
-import androidx.health.services.client.data.DataType
 import java.util.UUID
 import java.util.concurrent.Executors
 import kotlin.math.sqrt
@@ -43,8 +42,7 @@ private val CCCD_UUID        = UUID.fromString("00002902-0000-1000-8000-00805f9b
 @SuppressLint("MissingPermission")
 class WearMonitoringService : Service() {
 
-    private val executor = Executors.newSingleThreadExecutor()
-    private val scheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
+    private val scheduler = Executors.newSingleThreadScheduledExecutor()
     private var fakeHrJob: java.util.concurrent.ScheduledFuture<*>? = null
     @Volatile private var currentFakeHr: Int? = null
     @Volatile private var currentFakeHrv: Double? = null
@@ -55,14 +53,14 @@ class WearMonitoringService : Service() {
     private val connectedDevices = mutableSetOf<BluetoothDevice>()
 
     private val rrBuffer = ArrayDeque<Double>()
+    private var sensorManager: SensorManager? = null
 
-    private val measureCallback = object : MeasureCallback {
-        override fun onAvailabilityChanged(dataType: androidx.health.services.client.data.DeltaDataType<*, *>, availability: Availability) {
-            Log.d(TAG, "$dataType availability: $availability")
-        }
-        override fun onDataReceived(data: DataPointContainer) {
+    // SensorManager TYPE_HEART_RATE bypasses Health Services and works with screen off
+    // as long as PARTIAL_WAKE_LOCK keeps the CPU alive.
+    private val hrSensorListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
             if (currentFakeHr != null) return
-            val hr = data.getData(DataType.HEART_RATE_BPM).lastOrNull()?.value?.toInt() ?: return
+            val hr = event.values[0].toInt().takeIf { it > 0 } ?: return
             val hrv = currentFakeHrv ?: computeRmssd(hr)
             lastHr = hr
             lastHrv = hrv
@@ -70,6 +68,7 @@ class WearMonitoringService : Service() {
             notifyHr(hr)
             hrv?.let { notifyHrv(it) }
         }
+        override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) {}
     }
 
     private fun computeRmssd(hr: Int): Double? {
@@ -138,16 +137,14 @@ class WearMonitoringService : Service() {
 
         setupBleGattServer()
 
-        HealthServices.getClient(this).measureClient
-            .registerMeasureCallback(DataType.HEART_RATE_BPM, executor, measureCallback)
-
-        // Register passive listener — HrPassiveListenerService handles screen-off delivery
-        val passiveConfig = androidx.health.services.client.data.PassiveListenerConfig.builder()
-            .setDataTypes(setOf(DataType.HEART_RATE_BPM))
-            .build()
-        HealthServices.getClient(this).passiveMonitoringClient
-            .setPassiveListenerServiceAsync(HrPassiveListenerService::class.java, passiveConfig)
-            .addListener({ Log.i(TAG, "Passive HR listener registered") }, executor)
+        sensorManager = getSystemService(SensorManager::class.java)
+        val hrSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_HEART_RATE)
+        if (hrSensor != null) {
+            sensorManager?.registerListener(hrSensorListener, hrSensor, SensorManager.SENSOR_DELAY_NORMAL)
+            Log.i(TAG, "HR sensor registered: ${hrSensor.name}")
+        } else {
+            Log.e(TAG, "No TYPE_HEART_RATE sensor found")
+        }
 
         Log.i(TAG, "Service started — measuring HR + HRV")
     }
@@ -163,19 +160,6 @@ class WearMonitoringService : Service() {
             ACTION_FAKE_HRV -> {
                 val hrv = intent.getDoubleExtra(EXTRA_FAKE_HRV, -1.0)
                 if (hrv >= 0) setFakeHrv(hrv) else clearFakeHrv()
-            }
-            ACTION_BACKGROUND_HR -> {
-                if (currentFakeHr != null) return START_STICKY
-                val hr = intent.getIntExtra(EXTRA_HR, 0)
-                if (hr > 0) {
-                    lastHr = hr
-                    notifyHr(hr)
-                }
-                if (intent.hasExtra(EXTRA_HRV)) {
-                    val hrv = intent.getDoubleExtra(EXTRA_HRV, -1.0)
-                    lastHrv = hrv
-                    notifyHrv(hrv)
-                }
             }
         }
         return START_STICKY
@@ -219,12 +203,7 @@ class WearMonitoringService : Service() {
         super.onDestroy()
         stopBleAdvertising()
         gattServer?.close()
-        HealthServices.getClient(this).measureClient
-            .unregisterMeasureCallbackAsync(DataType.HEART_RATE_BPM, measureCallback)
-        HealthServices.getClient(this).passiveMonitoringClient
-            .clearPassiveListenerServiceAsync()
-            .addListener({}, executor)
-        executor.shutdown()
+        sensorManager?.unregisterListener(hrSensorListener)
         fakeHrJob?.cancel(false)
         scheduler.shutdown()
         wakeLock?.release()
@@ -234,7 +213,6 @@ class WearMonitoringService : Service() {
         bluetoothManager = getSystemService(BluetoothManager::class.java)
         gattServer = bluetoothManager.openGattServer(this, gattServerCallback)
 
-        // HR Service
         val hrChar = BluetoothGattCharacteristic(
             HR_CHAR_UUID,
             BluetoothGattCharacteristic.PROPERTY_NOTIFY,
@@ -312,11 +290,8 @@ class WearMonitoringService : Service() {
         const val ACTION_STOP_BROADCAST  = "com.ptsdalert.wear.STOP_BROADCAST"
         const val ACTION_FAKE_HR         = "com.ptsdalert.wear.FAKE_HR"
         const val ACTION_FAKE_HRV        = "com.ptsdalert.wear.FAKE_HRV"
-        const val ACTION_BACKGROUND_HR   = "com.ptsdalert.wear.BACKGROUND_HR"
         const val EXTRA_FAKE_HR          = "fake_hr"
         const val EXTRA_FAKE_HRV         = "fake_hrv"
-        const val EXTRA_HR               = "hr"
-        const val EXTRA_HRV              = "hrv"
         @Volatile var lastHr: Int? = null
         @Volatile var lastHrv: Double? = null
     }
