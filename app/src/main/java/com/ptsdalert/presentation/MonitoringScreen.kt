@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,6 +20,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -52,12 +55,17 @@ import com.ptsdalert.domain.model.LogLevel
 import com.ptsdalert.infrastructure.alert.AlertManager
 import com.ptsdalert.infrastructure.bluetooth.BleDevice
 import com.ptsdalert.infrastructure.settings.SettingsRepository
+import com.ptsdalert.infrastructure.settings.SettingsRepository.Companion.KEY_SHOW_BD
+import com.ptsdalert.infrastructure.settings.SettingsRepository.Companion.KEY_SHOW_BL
+import com.ptsdalert.infrastructure.settings.SettingsRepository.Companion.KEY_SHOW_BR
+import com.ptsdalert.infrastructure.settings.SettingsRepository.Companion.KEY_SHOW_HR
+import com.ptsdalert.infrastructure.settings.SettingsRepository.Companion.KEY_SHOW_HRV
 import com.ptsdalert.infrastructure.simulator.SimulatorMode
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun MonitoringScreen(
     viewModel: MonitoringViewModel = viewModel(
@@ -99,52 +107,108 @@ fun MonitoringScreen(
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary
                 )
-                Spacer(modifier = Modifier.height(48.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-                Text(
-                    text = "Heart Rate",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = "${uiState.heartRate ?: "--"} bpm",
-                    fontSize = 56.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Spacer(modifier = Modifier.height(24.dp))
-                Text(
-                    text = "est. HRV",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = uiState.estimatedHrv?.let { "${"%.1f".format(it)} ms" } ?: "-- ms",
-                    fontSize = 32.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.secondary
-                )
-
-                // ── HRV baseline row ──────────────────────────────────────
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
+                // ── Metric visibility toggles ─────────────────────────────
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    val baselineLabel = uiState.baselineHrv
-                        ?.let { "Baseline: ${"%.0f".format(it)}ms  (alert <${"%.0f".format(uiState.hrvHyperThreshold)}ms)" }
-                        ?: "Baseline HRV: not set  (alert <20ms)"
-                    Text(
-                        text = baselineLabel,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    TextButton(onClick = { showBaselineDialog = true }) {
-                        Text("Edit", style = MaterialTheme.typography.labelSmall)
+                    listOf(
+                        Triple("HR",  KEY_SHOW_HR,  uiState.showHr),
+                        Triple("HRV", KEY_SHOW_HRV, uiState.showHrv),
+                        Triple("BD",  KEY_SHOW_BD,  uiState.showBd),
+                        Triple("BR",  KEY_SHOW_BR,  uiState.showBr),
+                        Triple("BL",  KEY_SHOW_BL,  uiState.showBl)
+                    ).forEach { (label, key, selected) ->
+                        FilterChip(
+                            selected = selected,
+                            onClick = { viewModel.setMetricVisible(key, !selected) },
+                            label = { Text(label, fontSize = 12.sp) }
+                        )
                     }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
+
+                // ── HR ────────────────────────────────────────────────────
+                if (uiState.showHr) {
+                    Text(
+                        text = "Heart Rate",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "${uiState.heartRate ?: "--"} bpm",
+                        fontSize = 56.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
+                // ── HRV ───────────────────────────────────────────────────
+                if (uiState.showHrv) {
+                    Text(
+                        text = "HRV",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = uiState.estimatedHrv?.let { "${"%.1f".format(it)} ms" } ?: "-- ms",
+                        fontSize = 32.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        val baselineLabel = uiState.baselineHrv
+                            ?.let { "Baseline: ${"%.0f".format(it)}ms  (alert <${"%.0f".format(uiState.hrvHyperThreshold)}ms)" }
+                            ?: "Baseline: not set  (alert <20ms)"
+                        Text(
+                            text = baselineLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        TextButton(onClick = { showBaselineDialog = true }) {
+                            Text("Edit", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
+                // ── Breathing ─────────────────────────────────────────────
+                if (uiState.showBr || uiState.showBd || uiState.showBl) {
+                    Text(
+                        text = "Breathing",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (uiState.showBr) Text(
+                        text = "BR: ${uiState.breathingRate?.let { "${"%.1f".format(it)} /min" } ?: "--"}",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                    if (uiState.showBd) Text(
+                        text = "BD: ${uiState.breathingDepth?.let { "${"%.3f".format(it)}" } ?: "--"}",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                    if (uiState.showBl) Text(
+                        text = "BL: ${uiState.breathingLength?.let { "${"%.1f".format(it)} s" } ?: "--"}",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
                     text = "State",

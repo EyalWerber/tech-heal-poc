@@ -32,11 +32,13 @@ import java.util.UUID
 
 private const val TAG = "BluetoothWearableDataSource"
 
-private val HR_SERVICE_UUID  = UUID.fromString("0000180d-0000-1000-8000-00805f9b34fb")
-private val HR_CHAR_UUID     = UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb")
-private val HRV_SERVICE_UUID = UUID.fromString("0000fff0-0000-1000-8000-00805f9b34fb")
-private val HRV_CHAR_UUID    = UUID.fromString("0000fff1-0000-1000-8000-00805f9b34fb")
-private val CCCD_UUID        = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+private val HR_SERVICE_UUID        = UUID.fromString("0000180d-0000-1000-8000-00805f9b34fb")
+private val HR_CHAR_UUID           = UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb")
+private val HRV_SERVICE_UUID       = UUID.fromString("0000fff0-0000-1000-8000-00805f9b34fb")
+private val HRV_CHAR_UUID          = UUID.fromString("0000fff1-0000-1000-8000-00805f9b34fb")
+private val BREATHING_SERVICE_UUID = UUID.fromString("0000ffb0-0000-1000-8000-00805f9b34fb")
+private val BREATHING_CHAR_UUID    = UUID.fromString("0000ffb1-0000-1000-8000-00805f9b34fb")
+private val CCCD_UUID              = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
 class BluetoothWearableDataSource(private val context: Context) : WearableDataSource, BleScannable {
 
@@ -121,6 +123,9 @@ class BluetoothWearableDataSource(private val context: Context) : WearableDataSo
         val device = bluetoothAdapter.getRemoteDevice(address)
         var gatt: BluetoothGatt? = null
         var latestHrv: Double? = null
+        var latestBr: Float?   = null
+        var latestBd: Float?   = null
+        var latestBl: Float?   = null
 
         val callback = object : BluetoothGattCallback() {
             override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
@@ -143,10 +148,11 @@ class BluetoothWearableDataSource(private val context: Context) : WearableDataSo
                 enableNotifications(g, HR_SERVICE_UUID, HR_CHAR_UUID)
             }
 
+            // Sequential notification chain: HR → HRV → BREATHING
             override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
-                // After HR notifications enabled, enable HRV notifications
-                if (descriptor.characteristic.uuid == HR_CHAR_UUID) {
-                    enableNotifications(g, HRV_SERVICE_UUID, HRV_CHAR_UUID)
+                when (descriptor.characteristic.uuid) {
+                    HR_CHAR_UUID  -> enableNotifications(g, HRV_SERVICE_UUID, HRV_CHAR_UUID)
+                    HRV_CHAR_UUID -> enableNotifications(g, BREATHING_SERVICE_UUID, BREATHING_CHAR_UUID)
                 }
             }
 
@@ -171,11 +177,14 @@ class BluetoothWearableDataSource(private val context: Context) : WearableDataSo
                         val hr = parseHrBytes(value) ?: return
                         val hrv = latestHrv ?: deriveHrv(hr)
                         trySend(PhysiologicalSample(
-                            timestamp       = System.currentTimeMillis(),
-                            heartRate       = hr,
-                            hrv             = hrv,
-                            skinTemperature = null,
-                            stressScore     = deriveStress(hr)
+                            timestamp        = System.currentTimeMillis(),
+                            heartRate        = hr,
+                            hrv              = hrv,
+                            skinTemperature  = null,
+                            stressScore      = deriveStress(hr),
+                            breathingRate    = latestBr,
+                            breathingDepth   = latestBd,
+                            breathingLength  = latestBl
                         ))
                     }
                     HRV_CHAR_UUID -> {
@@ -183,6 +192,17 @@ class BluetoothWearableDataSource(private val context: Context) : WearableDataSo
                             val tenths = ((value[1].toInt() and 0xFF) shl 8) or (value[0].toInt() and 0xFF)
                             latestHrv = tenths / 10.0
                             AppLogger.d(TAG, "HRV from watch: $latestHrv ms")
+                        }
+                    }
+                    BREATHING_CHAR_UUID -> {
+                        if (value.size >= 6) {
+                            val brTenths  = ((value[1].toInt() and 0xFF) shl 8) or (value[0].toInt() and 0xFF)
+                            val bdThou    = ((value[3].toInt() and 0xFF) shl 8) or (value[2].toInt() and 0xFF)
+                            val blTenths  = ((value[5].toInt() and 0xFF) shl 8) or (value[4].toInt() and 0xFF)
+                            latestBr = brTenths / 10f
+                            latestBd = bdThou   / 1000f
+                            latestBl = blTenths / 10f
+                            AppLogger.d(TAG, "Breathing: BR=$latestBr BD=$latestBd BL=$latestBl")
                         }
                     }
                 }

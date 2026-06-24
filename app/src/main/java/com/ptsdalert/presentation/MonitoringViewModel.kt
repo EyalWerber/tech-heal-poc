@@ -13,6 +13,11 @@ import com.ptsdalert.infrastructure.alert.AlertManager
 import com.ptsdalert.infrastructure.alert.DismissSignal
 import com.ptsdalert.infrastructure.logging.AppLogger
 import com.ptsdalert.infrastructure.settings.SettingsRepository
+import com.ptsdalert.infrastructure.settings.SettingsRepository.Companion.KEY_SHOW_BD
+import com.ptsdalert.infrastructure.settings.SettingsRepository.Companion.KEY_SHOW_BL
+import com.ptsdalert.infrastructure.settings.SettingsRepository.Companion.KEY_SHOW_BR
+import com.ptsdalert.infrastructure.settings.SettingsRepository.Companion.KEY_SHOW_HR
+import com.ptsdalert.infrastructure.settings.SettingsRepository.Companion.KEY_SHOW_HRV
 import com.ptsdalert.infrastructure.simulator.SimulatorMode
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -38,11 +43,16 @@ class MonitoringViewModel(
 
     private val _uiState = MutableStateFlow(
         MonitoringUiState(
-            deviceLabel = wearableDataSource.deviceLabel,
-            isSimulator = simulatorControls != null,
-            baselineHrv = detectionConfig.baselineHrv,
+            deviceLabel       = wearableDataSource.deviceLabel,
+            isSimulator       = simulatorControls != null,
+            baselineHrv       = detectionConfig.baselineHrv,
             hrvHyperThreshold = detectionConfig.hrvHyperThreshold,
-            hrvHypoThreshold = detectionConfig.hrvHypoThreshold
+            hrvHypoThreshold  = detectionConfig.hrvHypoThreshold,
+            showHr  = settingsRepository.isMetricVisible(KEY_SHOW_HR),
+            showHrv = settingsRepository.isMetricVisible(KEY_SHOW_HRV),
+            showBd  = settingsRepository.isMetricVisible(KEY_SHOW_BD),
+            showBr  = settingsRepository.isMetricVisible(KEY_SHOW_BR),
+            showBl  = settingsRepository.isMetricVisible(KEY_SHOW_BL)
         )
     )
     val uiState: StateFlow<MonitoringUiState> = _uiState.asStateFlow()
@@ -72,9 +82,16 @@ class MonitoringViewModel(
         viewModelScope.launch {
             wearableDataSource.streamSamples().collect { sample ->
                 val state = DetectionEngine.classify(sample, detectionConfig)
-                val hrv = sample.heartRate?.let { hrvCalculator.addSample(it) }
+                val hrv = sample.hrv ?: sample.heartRate?.let { hrvCalculator.addSample(it) }
                 _uiState.update { current ->
-                    current.copy(heartRate = sample.heartRate, estimatedHrv = hrv, arousalState = state)
+                    current.copy(
+                        heartRate      = sample.heartRate,
+                        estimatedHrv   = hrv,
+                        arousalState   = state,
+                        breathingRate  = sample.breathingRate  ?: current.breathingRate,
+                        breathingDepth = sample.breathingDepth ?: current.breathingDepth,
+                        breathingLength= sample.breathingLength?: current.breathingLength
+                    )
                 }
                 handleStateTransition(state)
             }
@@ -135,6 +152,20 @@ class MonitoringViewModel(
         when (state) {
             ArousalState.NORMAL -> alertManager.stopAlerts()
             else -> alertManager.startAlerts(state, viewModelScope)
+        }
+    }
+
+    fun setMetricVisible(key: String, visible: Boolean) {
+        settingsRepository.setMetricVisible(key, visible)
+        _uiState.update { current ->
+            when (key) {
+                KEY_SHOW_HR  -> current.copy(showHr  = visible)
+                KEY_SHOW_HRV -> current.copy(showHrv = visible)
+                KEY_SHOW_BD  -> current.copy(showBd  = visible)
+                KEY_SHOW_BR  -> current.copy(showBr  = visible)
+                KEY_SHOW_BL  -> current.copy(showBl  = visible)
+                else         -> current
+            }
         }
     }
 

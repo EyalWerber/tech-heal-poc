@@ -15,5 +15,15 @@ data class MonitoringUiState(
     val hrvHyperThreshold: Double = 20.0,
     val hrvHypoThreshold: Double = 80.0,
     val bleDevices: List<BleDevice> = emptyList(),
-    val bleScanning: Boolean = false
+    val bleScanning: Boolean = false,
+    // Breathing metrics from IMU
+    val breathingRate: Float? = null,
+    val breathingDepth: Float? = null,
+    val breathingLength: Float? = null,
+    // Metric visibility toggles (all shown by default)
+    val showHr: Boolean  = true,
+    val showHrv: Boolean = true,
+    val showBd: Boolean  = true,
+    val showBr: Boolean  = true,
+    val showBl: Boolean  = true
 )
