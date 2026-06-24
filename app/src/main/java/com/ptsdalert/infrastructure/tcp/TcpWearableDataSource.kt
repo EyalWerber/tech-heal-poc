@@ -18,8 +18,8 @@ import java.net.Socket
 private const val TAG = "TcpWearableDataSource"
 
 class TcpWearableDataSource(
-    // private val host: String = "10.0.2.2", // emulator: host machine alias
-    private val host: String = "127.0.0.1",   // physical device: `adb reverse tcp:9999 tcp:9999`
+    private val host: String = "10.0.2.2",     // emulator: host machine alias
+    // private val host: String = "127.0.0.1", // physical device: `adb reverse tcp:9999 tcp:9999`
     private val port: Int = 9999
 ) : WearableDataSource {
 

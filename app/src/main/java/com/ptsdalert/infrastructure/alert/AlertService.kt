@@ -9,12 +9,72 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
+import com.google.android.gms.wearable.MessageClient
+import com.google.android.gms.wearable.Wearable
 import com.ptsdalert.domain.model.ArousalState
 import com.ptsdalert.infrastructure.logging.AppLogger
+import com.ptsdalert.infrastructure.wearos.WearDataListenerService
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import java.net.ServerSocket
 
 class AlertService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
+    private val tcpScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    private val wearMessageListener = MessageClient.OnMessageReceivedListener { event ->
+        if (event.path == WearDataListenerService.MESSAGE_PATH) {
+            val json = String(event.data, Charsets.UTF_8)
+            val sample = WearDataListenerService.parseSample(json) ?: return@OnMessageReceivedListener
+            WearDataListenerService.sampleFlow.tryEmit(sample)
+            AppLogger.d(TAG, "WearOS sample via MessageClient: HR=${sample.heartRate}")
+        }
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        try {
+            Wearable.getMessageClient(this).addListener(wearMessageListener)
+            AppLogger.i(TAG, "WearOS MessageClient listener registered")
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "Failed to register WearOS listener: ${e.message}")
+        }
+        startTcpServer()
+    }
+
+    private fun startTcpServer() {
+        tcpScope.launch {
+            try {
+                ServerSocket(TCP_PORT).use { server ->
+                    AppLogger.i(TAG, "Watch TCP server listening on port $TCP_PORT")
+                    while (isActive) {
+                        val socket = runCatching { server.accept() }.getOrNull() ?: break
+                        launch {
+                            runCatching {
+                                socket.use {
+                                    val json = it.getInputStream().bufferedReader().readLine()
+                                    if (json != null) {
+                                        val sample = WearDataListenerService.parseSample(json)
+                                        if (sample != null) {
+                                            WearDataListenerService.sampleFlow.tryEmit(sample)
+                                            AppLogger.d(TAG, "TCP sample received: HR=${sample.heartRate}")
+                                        }
+                                    }
+                                }
+                            }.onFailure { e -> AppLogger.e(TAG, "TCP client error: ${e.message}") }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "TCP server error: ${e.message}")
+            }
+        }
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val stateName = intent?.getStringExtra(EXTRA_STATE) ?: run {
@@ -39,7 +99,13 @@ class AlertService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        AppLogger.i("AlertService", "Foreground service destroyed")
+        AppLogger.i(TAG, "Foreground service destroyed")
+        tcpScope.cancel()
+        try {
+            Wearable.getMessageClient(this).removeListener(wearMessageListener)
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "Failed to unregister WearOS listener: ${e.message}")
+        }
         releaseWakeLock()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -52,7 +118,7 @@ class AlertService : Service() {
     private fun acquireWakeLock() {
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PTSDAlert:AlertWakeLock").apply {
-            acquire(10 * 60 * 1000L) // 10 min max — service stops when dismissed
+            acquire(10 * 60 * 1000L)
         }
         AppLogger.d("AlertService", "WakeLock acquired")
     }
@@ -103,7 +169,9 @@ class AlertService : Service() {
     }
 
     companion object {
+        private const val TAG = "AlertService"
         const val EXTRA_STATE = "state"
         const val NOTIFICATION_ID = 1001
+        const val TCP_PORT = 9998
     }
 }

@@ -26,11 +26,13 @@ import com.ptsdalert.ui.theme.PTSDAlertPOCTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        DeviceProvider.init(this)
         AppLogger.init(SqliteLogRepository(applicationContext))
         AppLogger.i("MainActivity", "App started")
         createNotificationChannel()
         requestNotificationPermissionIfNeeded()
         requestFullScreenIntentPermissionIfNeeded()
+        requestBlePermissionsIfNeeded()
         startMonitoringService()
         enableEdgeToEdge()
         setContent {
@@ -74,7 +76,8 @@ class MainActivity : ComponentActivity() {
             ).apply {
                 description = "Alerts for hypo/hyperarousal state transitions"
                 // USAGE_ALARM bypasses silent mode and DND — required for a safety alert app.
-                setAudioAttributes(
+                setSound(
+                    Settings.System.DEFAULT_ALARM_ALERT_URI,
                     AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_ALARM)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
@@ -96,6 +99,20 @@ class MainActivity : ComponentActivity() {
                     arrayOf(Manifest.permission.POST_NOTIFICATIONS),
                     0
                 )
+            }
+        }
+    }
+
+    private fun requestBlePermissionsIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val missing = listOf(
+                android.Manifest.permission.BLUETOOTH_SCAN,
+                android.Manifest.permission.BLUETOOTH_CONNECT
+            ).filter {
+                ActivityCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+            }
+            if (missing.isNotEmpty()) {
+                ActivityCompat.requestPermissions(this, missing.toTypedArray(), 1001)
             }
         }
     }
