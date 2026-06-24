@@ -36,18 +36,37 @@ object DetectionEngine {
     // Boundaries are INCLUSIVE of NORMAL:
     //   HR == 100 → NORMAL  (not HYPERAROUSAL)
     //   HR == 50  → NORMAL  (not HYPOAROUSAL)
-    fun classify(sample: PhysiologicalSample): ArousalState {
-        // Elvis operator ?: — Python equivalent: hr = sample.heart_rate; if hr is None: return NORMAL
-        // If heartRate is null, early-return NORMAL without alarming.
-        val hr = sample.heartRate
-            ?: return ArousalState.NORMAL
+    // HRV thresholds (RMSSD ms):
+    //   < 20ms  → HYPERAROUSAL (low HRV = stress/fight-or-flight)
+    //   > 80ms  → HYPOAROUSAL  (very high HRV = freeze/dissociation)
+    private const val HRV_HYPER_THRESHOLD = 20.0
+    private const val HRV_HYPO_THRESHOLD  = 80.0
 
-        // `when` = Kotlin's match/case (or Python's if/elif/else, but as an expression).
-        // Returns the matched ArousalState value directly.
+    fun classify(sample: PhysiologicalSample): ArousalState {
+        val hr  = sample.heartRate
+        val hrv = sample.hrv
+
+        // HR check
+        val hrState = when {
+            hr == null   -> ArousalState.NORMAL
+            hr > 100     -> ArousalState.HYPERAROUSAL
+            hr < 50      -> ArousalState.HYPOAROUSAL
+            else         -> ArousalState.NORMAL
+        }
+
+        // HRV check (only when HRV is available)
+        val hrvState = when {
+            hrv == null          -> ArousalState.NORMAL
+            hrv < HRV_HYPER_THRESHOLD -> ArousalState.HYPERAROUSAL
+            hrv > HRV_HYPO_THRESHOLD  -> ArousalState.HYPOAROUSAL
+            else                 -> ArousalState.NORMAL
+        }
+
+        // Either metric being abnormal triggers the alert; HYPERAROUSAL takes priority
         return when {
-            hr > 100 -> ArousalState.HYPERAROUSAL
-            hr < 50  -> ArousalState.HYPOAROUSAL
-            else     -> ArousalState.NORMAL
+            hrState == ArousalState.HYPERAROUSAL || hrvState == ArousalState.HYPERAROUSAL -> ArousalState.HYPERAROUSAL
+            hrState == ArousalState.HYPOAROUSAL  || hrvState == ArousalState.HYPOAROUSAL  -> ArousalState.HYPOAROUSAL
+            else -> ArousalState.NORMAL
         }
     }
 }

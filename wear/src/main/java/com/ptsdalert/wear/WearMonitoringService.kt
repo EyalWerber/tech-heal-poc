@@ -47,6 +47,7 @@ class WearMonitoringService : Service() {
     private val scheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
     private var fakeHrJob: java.util.concurrent.ScheduledFuture<*>? = null
     @Volatile private var currentFakeHr: Int? = null
+    @Volatile private var currentFakeHrv: Double? = null
     private var wakeLock: PowerManager.WakeLock? = null
 
     private lateinit var bluetoothManager: BluetoothManager
@@ -62,7 +63,7 @@ class WearMonitoringService : Service() {
         override fun onDataReceived(data: DataPointContainer) {
             if (currentFakeHr != null) return
             val hr = data.getData(DataType.HEART_RATE_BPM).lastOrNull()?.value?.toInt() ?: return
-            val hrv = computeRmssd(hr)
+            val hrv = currentFakeHrv ?: computeRmssd(hr)
             lastHr = hr
             lastHrv = hrv
             Log.i(TAG, "HR=$hr HRV=${hrv?.let { "%.1f".format(it) } ?: "--"}")
@@ -140,6 +141,14 @@ class WearMonitoringService : Service() {
         HealthServices.getClient(this).measureClient
             .registerMeasureCallback(DataType.HEART_RATE_BPM, executor, measureCallback)
 
+        // Register passive listener — HrPassiveListenerService handles screen-off delivery
+        val passiveConfig = androidx.health.services.client.data.PassiveListenerConfig.builder()
+            .setDataTypes(setOf(DataType.HEART_RATE_BPM))
+            .build()
+        HealthServices.getClient(this).passiveMonitoringClient
+            .setPassiveListenerServiceAsync(HrPassiveListenerService::class.java, passiveConfig)
+            .addListener({ Log.i(TAG, "Passive HR listener registered") }, executor)
+
         Log.i(TAG, "Service started — measuring HR + HRV")
     }
 
@@ -150,6 +159,23 @@ class WearMonitoringService : Service() {
             ACTION_FAKE_HR -> {
                 val bpm = intent.getIntExtra(EXTRA_FAKE_HR, 0)
                 if (bpm > 0) setFakeHr(bpm) else clearFakeHr()
+            }
+            ACTION_FAKE_HRV -> {
+                val hrv = intent.getDoubleExtra(EXTRA_FAKE_HRV, -1.0)
+                if (hrv >= 0) setFakeHrv(hrv) else clearFakeHrv()
+            }
+            ACTION_BACKGROUND_HR -> {
+                if (currentFakeHr != null) return START_STICKY
+                val hr = intent.getIntExtra(EXTRA_HR, 0)
+                if (hr > 0) {
+                    lastHr = hr
+                    notifyHr(hr)
+                }
+                if (intent.hasExtra(EXTRA_HRV)) {
+                    val hrv = intent.getDoubleExtra(EXTRA_HRV, -1.0)
+                    lastHrv = hrv
+                    notifyHrv(hrv)
+                }
             }
         }
         return START_STICKY
@@ -175,6 +201,18 @@ class WearMonitoringService : Service() {
         Log.i(TAG, "Fake HR cleared — back to real HR")
     }
 
+    private fun setFakeHrv(hrv: Double) {
+        currentFakeHrv = hrv
+        lastHrv = hrv
+        notifyHrv(hrv)
+        Log.i(TAG, "Fake HRV: $hrv ms")
+    }
+
+    private fun clearFakeHrv() {
+        currentFakeHrv = null
+        Log.i(TAG, "Fake HRV cleared")
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
@@ -183,6 +221,9 @@ class WearMonitoringService : Service() {
         gattServer?.close()
         HealthServices.getClient(this).measureClient
             .unregisterMeasureCallbackAsync(DataType.HEART_RATE_BPM, measureCallback)
+        HealthServices.getClient(this).passiveMonitoringClient
+            .clearPassiveListenerServiceAsync()
+            .addListener({}, executor)
         executor.shutdown()
         fakeHrJob?.cancel(false)
         scheduler.shutdown()
@@ -270,7 +311,12 @@ class WearMonitoringService : Service() {
         const val ACTION_START_BROADCAST = "com.ptsdalert.wear.START_BROADCAST"
         const val ACTION_STOP_BROADCAST  = "com.ptsdalert.wear.STOP_BROADCAST"
         const val ACTION_FAKE_HR         = "com.ptsdalert.wear.FAKE_HR"
+        const val ACTION_FAKE_HRV        = "com.ptsdalert.wear.FAKE_HRV"
+        const val ACTION_BACKGROUND_HR   = "com.ptsdalert.wear.BACKGROUND_HR"
         const val EXTRA_FAKE_HR          = "fake_hr"
+        const val EXTRA_FAKE_HRV         = "fake_hrv"
+        const val EXTRA_HR               = "hr"
+        const val EXTRA_HRV              = "hrv"
         @Volatile var lastHr: Int? = null
         @Volatile var lastHrv: Double? = null
     }

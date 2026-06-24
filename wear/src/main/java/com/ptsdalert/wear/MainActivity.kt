@@ -22,8 +22,12 @@ class MainActivity : Activity() {
     private lateinit var btnHigh: Button
     private lateinit var btnLow: Button
     private lateinit var btnReal: Button
+    private lateinit var btnHighHrv: Button
+    private lateinit var btnLowHrv: Button
+    private lateinit var btnRealHrv: Button
     private var broadcasting = false
     private var activeFakeHr: Int? = null
+    private var activeFakeHrv: Double? = null
     private val handler = Handler(Looper.getMainLooper())
 
     private val poller = object : Runnable {
@@ -35,7 +39,13 @@ class MainActivity : Activity() {
                 30   -> Color.rgb(80, 160, 255)
                 else -> Color.WHITE
             })
-            hrvText.text = WearMonitoringService.lastHrv?.let { "HRV ${"%.1f".format(it)} ms" } ?: "HRV --"
+            val hrv = activeFakeHrv ?: WearMonitoringService.lastHrv
+            hrvText.text = hrv?.let { "HRV ${"%.1f".format(it)} ms" } ?: "HRV --"
+            hrvText.setTextColor(when {
+                activeFakeHrv != null && activeFakeHrv!! > 50 -> Color.GREEN
+                activeFakeHrv != null && activeFakeHrv!! < 50 -> Color.rgb(255, 140, 0)
+                else -> Color.LTGRAY
+            })
             handler.postDelayed(this, 1000)
         }
     }
@@ -82,6 +92,27 @@ class MainActivity : Activity() {
             setBackgroundColor(Color.DKGRAY)
             setOnClickListener { clearFakeHr() }
         }
+        btnHighHrv = Button(this).apply {
+            text = "High HRV (100ms)"
+            textSize = 12f
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.rgb(0, 80, 0))
+            setOnClickListener { sendFakeHrv(100.0) }
+        }
+        btnLowHrv = Button(this).apply {
+            text = "Low HRV (10ms)"
+            textSize = 12f
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.rgb(80, 40, 0))
+            setOnClickListener { sendFakeHrv(10.0) }
+        }
+        btnRealHrv = Button(this).apply {
+            text = "Back to Real HRV"
+            textSize = 12f
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.DKGRAY)
+            setOnClickListener { clearFakeHrv() }
+        }
 
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -92,11 +123,15 @@ class MainActivity : Activity() {
             addView(btnHigh)
             addView(btnLow)
             addView(btnReal)
+            addView(btnHighHrv)
+            addView(btnLowHrv)
+            addView(btnRealHrv)
         }
         setContentView(ScrollView(this).apply { addView(layout) })
 
         val missing = arrayOf(
             Manifest.permission.BODY_SENSORS,
+            Manifest.permission.BODY_SENSORS_BACKGROUND,
             Manifest.permission.ACTIVITY_RECOGNITION,
             Manifest.permission.BLUETOOTH_CONNECT,
             Manifest.permission.BLUETOOTH_ADVERTISE
@@ -135,6 +170,26 @@ class MainActivity : Activity() {
         btnLow.setBackgroundColor(Color.rgb(0, 40, 120))
         startService(Intent(this, WearMonitoringService::class.java).apply {
             action = WearMonitoringService.ACTION_FAKE_HR
+        })
+    }
+
+    private fun sendFakeHrv(hrv: Double) {
+        activeFakeHrv = hrv
+        btnHighHrv.setBackgroundColor(if (hrv > 50) Color.rgb(0, 160, 0) else Color.rgb(0, 80, 0))
+        btnLowHrv.setBackgroundColor(if (hrv < 50) Color.rgb(160, 80, 0) else Color.rgb(80, 40, 0))
+        startService(Intent(this, WearMonitoringService::class.java).apply {
+            action = WearMonitoringService.ACTION_FAKE_HRV
+            putExtra(WearMonitoringService.EXTRA_FAKE_HRV, hrv)
+        })
+    }
+
+    private fun clearFakeHrv() {
+        activeFakeHrv = null
+        btnHighHrv.setBackgroundColor(Color.rgb(0, 80, 0))
+        btnLowHrv.setBackgroundColor(Color.rgb(80, 40, 0))
+        startService(Intent(this, WearMonitoringService::class.java).apply {
+            action = WearMonitoringService.ACTION_FAKE_HRV
+            putExtra(WearMonitoringService.EXTRA_FAKE_HRV, -1.0)
         })
     }
 
