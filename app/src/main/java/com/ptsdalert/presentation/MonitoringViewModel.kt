@@ -5,11 +5,13 @@ import androidx.lifecycle.viewModelScope
 import com.ptsdalert.domain.detection.DetectionEngine
 import com.ptsdalert.domain.detection.HrvCalculator
 import com.ptsdalert.domain.model.ArousalState
+import com.ptsdalert.domain.model.DetectionConfig
 import com.ptsdalert.domain.ports.SimulatorControls
 import com.ptsdalert.domain.ports.WearableDataSource
 import com.ptsdalert.infrastructure.alert.AlertManager
 import com.ptsdalert.infrastructure.alert.DismissSignal
 import com.ptsdalert.infrastructure.logging.AppLogger
+import com.ptsdalert.infrastructure.settings.SettingsRepository
 import com.ptsdalert.infrastructure.simulator.SimulatorMode
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -24,15 +26,21 @@ private const val TAG = "MonitoringViewModel"
 
 class MonitoringViewModel(
     private val wearableDataSource: WearableDataSource,
-    private val alertManager: AlertManager
+    private val alertManager: AlertManager,
+    private val settingsRepository: SettingsRepository
 ) : ViewModel() {
 
     private val simulatorControls: SimulatorControls? = wearableDataSource as? SimulatorControls
 
+    private var detectionConfig = buildConfig(settingsRepository.getBaselineHrv())
+
     private val _uiState = MutableStateFlow(
         MonitoringUiState(
             deviceLabel = wearableDataSource.deviceLabel,
-            isSimulator = simulatorControls != null
+            isSimulator = simulatorControls != null,
+            baselineHrv = detectionConfig.baselineHrv,
+            hrvHyperThreshold = detectionConfig.hrvHyperThreshold,
+            hrvHypoThreshold = detectionConfig.hrvHypoThreshold
         )
     )
     val uiState: StateFlow<MonitoringUiState> = _uiState.asStateFlow()
@@ -44,6 +52,7 @@ class MonitoringViewModel(
 
     init {
         AppLogger.i(TAG, "ViewModel created — source: ${wearableDataSource.deviceLabel}")
+        logConfig()
 
         viewModelScope.launch {
             AppLogger.observeRecent(50).collect { logs ->
@@ -60,13 +69,33 @@ class MonitoringViewModel(
 
         viewModelScope.launch {
             wearableDataSource.streamSamples().collect { sample ->
-                val state = DetectionEngine.classify(sample)
+                val state = DetectionEngine.classify(sample, detectionConfig)
                 val hrv = sample.heartRate?.let { hrvCalculator.addSample(it) }
                 _uiState.update { current ->
                     current.copy(heartRate = sample.heartRate, estimatedHrv = hrv, arousalState = state)
                 }
                 handleStateTransition(state)
             }
+        }
+    }
+
+    fun setBaselineHrv(hrv: Double?) {
+        settingsRepository.setBaselineHrv(hrv)
+        detectionConfig = buildConfig(hrv)
+        _uiState.update { it.copy(
+            baselineHrv = hrv,
+            hrvHyperThreshold = detectionConfig.hrvHyperThreshold,
+            hrvHypoThreshold = detectionConfig.hrvHypoThreshold
+        )}
+        logConfig()
+    }
+
+    private fun logConfig() {
+        val baseline = detectionConfig.baselineHrv
+        if (baseline != null) {
+            AppLogger.i(TAG, "HRV baseline: ${baseline}ms → hyper<${detectionConfig.hrvHyperThreshold}ms hypo>${detectionConfig.hrvHypoThreshold}ms")
+        } else {
+            AppLogger.i(TAG, "HRV thresholds: default (hyper<20ms hypo>80ms)")
         }
     }
 
@@ -106,5 +135,9 @@ class MonitoringViewModel(
         AppLogger.i(TAG, "ViewModel cleared")
         super.onCleared()
         alertManager.stopAlerts()
+    }
+
+    private companion object {
+        fun buildConfig(baseline: Double?) = DetectionConfig(baselineHrv = baseline)
     }
 }

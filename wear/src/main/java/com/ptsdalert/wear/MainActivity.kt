@@ -23,6 +23,7 @@ class MainActivity : Activity() {
     private lateinit var btnLow: Button
     private lateinit var btnReal: Button
     private lateinit var btnHighHrv: Button
+    private lateinit var btnNormalHrv: Button
     private lateinit var btnLowHrv: Button
     private lateinit var btnRealHrv: Button
     private var broadcasting = false
@@ -99,12 +100,19 @@ class MainActivity : Activity() {
             setBackgroundColor(Color.rgb(0, 80, 0))
             setOnClickListener { sendFakeHrv(100.0) }
         }
+        btnNormalHrv = Button(this).apply {
+            text = "Normal HRV (30ms)"
+            textSize = 12f
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.rgb(0, 100, 80))
+            setOnClickListener { sendFakeHrv(30.0) }
+        }
         btnLowHrv = Button(this).apply {
-            text = "Low HRV (10ms)"
+            text = "Low HRV (5ms)"
             textSize = 12f
             setTextColor(Color.WHITE)
             setBackgroundColor(Color.rgb(80, 40, 0))
-            setOnClickListener { sendFakeHrv(10.0) }
+            setOnClickListener { sendFakeHrv(5.0) }
         }
         btnRealHrv = Button(this).apply {
             text = "Back to Real HRV"
@@ -124,6 +132,7 @@ class MainActivity : Activity() {
             addView(btnLow)
             addView(btnReal)
             addView(btnHighHrv)
+            addView(btnNormalHrv)
             addView(btnLowHrv)
             addView(btnRealHrv)
         }
@@ -175,8 +184,9 @@ class MainActivity : Activity() {
 
     private fun sendFakeHrv(hrv: Double) {
         activeFakeHrv = hrv
-        btnHighHrv.setBackgroundColor(if (hrv > 50) Color.rgb(0, 160, 0) else Color.rgb(0, 80, 0))
-        btnLowHrv.setBackgroundColor(if (hrv < 50) Color.rgb(160, 80, 0) else Color.rgb(80, 40, 0))
+        btnHighHrv.setBackgroundColor(if (hrv == 100.0) Color.rgb(0, 160, 0) else Color.rgb(0, 80, 0))
+        btnNormalHrv.setBackgroundColor(if (hrv == 30.0) Color.rgb(0, 200, 160) else Color.rgb(0, 100, 80))
+        btnLowHrv.setBackgroundColor(if (hrv == 5.0) Color.rgb(160, 80, 0) else Color.rgb(80, 40, 0))
         startService(Intent(this, WearMonitoringService::class.java).apply {
             action = WearMonitoringService.ACTION_FAKE_HRV
             putExtra(WearMonitoringService.EXTRA_FAKE_HRV, hrv)
@@ -186,6 +196,7 @@ class MainActivity : Activity() {
     private fun clearFakeHrv() {
         activeFakeHrv = null
         btnHighHrv.setBackgroundColor(Color.rgb(0, 80, 0))
+        btnNormalHrv.setBackgroundColor(Color.rgb(0, 100, 80))
         btnLowHrv.setBackgroundColor(Color.rgb(80, 40, 0))
         startService(Intent(this, WearMonitoringService::class.java).apply {
             action = WearMonitoringService.ACTION_FAKE_HRV

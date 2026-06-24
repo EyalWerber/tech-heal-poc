@@ -9,5 +9,8 @@ data class MonitoringUiState(
     val arousalState: ArousalState = ArousalState.NORMAL,
     val deviceLabel: String = "",
     val isSimulator: Boolean = false,
-    val recentLogs: List<LogEntry> = emptyList()
+    val recentLogs: List<LogEntry> = emptyList(),
+    val baselineHrv: Double? = null,
+    val hrvHyperThreshold: Double = 20.0,
+    val hrvHypoThreshold: Double = 80.0
 )
