@@ -33,11 +33,13 @@ import kotlin.math.sqrt
 
 private const val TAG = "WearMonitoringService"
 
-private val HR_SERVICE_UUID  = UUID.fromString("0000180d-0000-1000-8000-00805f9b34fb")
-private val HR_CHAR_UUID     = UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb")
-private val HRV_SERVICE_UUID = UUID.fromString("0000fff0-0000-1000-8000-00805f9b34fb")
-private val HRV_CHAR_UUID    = UUID.fromString("0000fff1-0000-1000-8000-00805f9b34fb")
-private val CCCD_UUID        = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+private val HR_SERVICE_UUID        = UUID.fromString("0000180d-0000-1000-8000-00805f9b34fb")
+private val HR_CHAR_UUID           = UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb")
+private val HRV_SERVICE_UUID       = UUID.fromString("0000fff0-0000-1000-8000-00805f9b34fb")
+private val HRV_CHAR_UUID          = UUID.fromString("0000fff1-0000-1000-8000-00805f9b34fb")
+private val BREATHING_SERVICE_UUID = UUID.fromString("0000ffb0-0000-1000-8000-00805f9b34fb")
+private val BREATHING_CHAR_UUID    = UUID.fromString("0000ffb1-0000-1000-8000-00805f9b34fb")
+private val CCCD_UUID              = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
 @SuppressLint("MissingPermission")
 class WearMonitoringService : Service() {
@@ -46,6 +48,7 @@ class WearMonitoringService : Service() {
     private var fakeHrJob: java.util.concurrent.ScheduledFuture<*>? = null
     @Volatile private var currentFakeHr: Int? = null
     @Volatile private var currentFakeHrv: Double? = null
+    @Volatile private var currentFakeBreathing: BreathingMetrics? = null
     private var wakeLock: PowerManager.WakeLock? = null
 
     private lateinit var bluetoothManager: BluetoothManager
@@ -54,6 +57,7 @@ class WearMonitoringService : Service() {
 
     private val rrBuffer = ArrayDeque<Double>()
     private var sensorManager: SensorManager? = null
+    private val breathingCalculator = BreathingCalculator()
 
     // SensorManager TYPE_HEART_RATE bypasses Health Services and works with screen off
     // as long as PARTIAL_WAKE_LOCK keeps the CPU alive.
@@ -71,6 +75,25 @@ class WearMonitoringService : Service() {
         override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) {}
     }
 
+    // TYPE_LINEAR_ACCELERATION at 10 Hz for chest-mounted breathing detection
+    private val imuSensorListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            if (currentFakeBreathing != null) return
+            val metrics = breathingCalculator.addSample(
+                event.values[0], event.values[1], event.values[2], System.currentTimeMillis()
+            )
+            if (metrics != null) {
+                lastBreathingRate   = metrics.breathingRate
+                lastBreathingDepth  = metrics.breathingDepth
+                lastBreathingLength = metrics.breathingLength
+                Log.i(TAG, "Breathing: BR=%.1f BD=%.3f BL=%.1f".format(
+                    metrics.breathingRate, metrics.breathingDepth, metrics.breathingLength))
+                notifyBreathing(metrics)
+            }
+        }
+        override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) {}
+    }
+
     private fun computeRmssd(hr: Int): Double? {
         if (hr <= 0) return null
         val rr = 60000.0 / hr
@@ -82,21 +105,14 @@ class WearMonitoringService : Service() {
         return if (result.isFinite()) result else null
     }
 
+    // Sequential GATT chain: HR added → HRV added → BREATHING added (avoids race conditions)
     private val gattServerCallback = object : BluetoothGattServerCallback() {
         override fun onServiceAdded(status: Int, service: BluetoothGattService) {
-            if (service.uuid == HR_SERVICE_UUID && status == BluetoothGatt.GATT_SUCCESS) {
-                val hrvChar = BluetoothGattCharacteristic(
-                    HRV_CHAR_UUID,
-                    BluetoothGattCharacteristic.PROPERTY_NOTIFY,
-                    BluetoothGattCharacteristic.PERMISSION_READ
-                ).apply {
-                    addDescriptor(BluetoothGattDescriptor(CCCD_UUID,
-                        BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE))
-                }
-                gattServer?.addService(
-                    BluetoothGattService(HRV_SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY)
-                        .also { it.addCharacteristic(hrvChar) }
-                )
+            when {
+                service.uuid == HR_SERVICE_UUID && status == BluetoothGatt.GATT_SUCCESS ->
+                    gattServer?.addService(buildNotifyService(HRV_SERVICE_UUID, HRV_CHAR_UUID))
+                service.uuid == HRV_SERVICE_UUID && status == BluetoothGatt.GATT_SUCCESS ->
+                    gattServer?.addService(buildNotifyService(BREATHING_SERVICE_UUID, BREATHING_CHAR_UUID))
             }
         }
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
@@ -138,15 +154,17 @@ class WearMonitoringService : Service() {
         setupBleGattServer()
 
         sensorManager = getSystemService(SensorManager::class.java)
-        val hrSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_HEART_RATE)
-        if (hrSensor != null) {
-            sensorManager?.registerListener(hrSensorListener, hrSensor, SensorManager.SENSOR_DELAY_NORMAL)
-            Log.i(TAG, "HR sensor registered: ${hrSensor.name}")
-        } else {
-            Log.e(TAG, "No TYPE_HEART_RATE sensor found")
-        }
+        sensorManager?.getDefaultSensor(Sensor.TYPE_HEART_RATE)?.let { sensor ->
+            sensorManager?.registerListener(hrSensorListener, sensor, SensorManager.SENSOR_DELAY_NORMAL)
+            Log.i(TAG, "HR sensor registered: ${sensor.name}")
+        } ?: Log.e(TAG, "No TYPE_HEART_RATE sensor found")
 
-        Log.i(TAG, "Service started — measuring HR + HRV")
+        sensorManager?.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)?.let { sensor ->
+            sensorManager?.registerListener(imuSensorListener, sensor, 100_000) // 10 Hz
+            Log.i(TAG, "IMU sensor registered: ${sensor.name}")
+        } ?: Log.e(TAG, "No TYPE_LINEAR_ACCELERATION sensor found")
+
+        Log.i(TAG, "Service started — measuring HR + HRV + Breathing")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -160,6 +178,10 @@ class WearMonitoringService : Service() {
             ACTION_FAKE_HRV -> {
                 val hrv = intent.getDoubleExtra(EXTRA_FAKE_HRV, -1.0)
                 if (hrv >= 0) setFakeHrv(hrv) else clearFakeHrv()
+            }
+            ACTION_FAKE_BREATHING -> {
+                val br = intent.getFloatExtra(EXTRA_FAKE_BR, -1f)
+                if (br >= 0) setFakeBreathing(br) else clearFakeBreathing()
             }
         }
         return START_STICKY
@@ -197,6 +219,23 @@ class WearMonitoringService : Service() {
         Log.i(TAG, "Fake HRV cleared")
     }
 
+    private fun setFakeBreathing(br: Float) {
+        val bl = if (br > 0) 60f / br else 4f
+        val metrics = BreathingMetrics(br, 0.12f, bl)
+        currentFakeBreathing = metrics
+        lastBreathingRate   = metrics.breathingRate
+        lastBreathingDepth  = metrics.breathingDepth
+        lastBreathingLength = metrics.breathingLength
+        notifyBreathing(metrics)
+        Log.i(TAG, "Fake Breathing: BR=$br BPM")
+    }
+
+    private fun clearFakeBreathing() {
+        currentFakeBreathing = null
+        breathingCalculator.reset()
+        Log.i(TAG, "Fake Breathing cleared")
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
@@ -204,6 +243,7 @@ class WearMonitoringService : Service() {
         stopBleAdvertising()
         gattServer?.close()
         sensorManager?.unregisterListener(hrSensorListener)
+        sensorManager?.unregisterListener(imuSensorListener)
         fakeHrJob?.cancel(false)
         scheduler.shutdown()
         wakeLock?.release()
@@ -212,22 +252,24 @@ class WearMonitoringService : Service() {
     private fun setupBleGattServer() {
         bluetoothManager = getSystemService(BluetoothManager::class.java)
         gattServer = bluetoothManager.openGattServer(this, gattServerCallback)
-
-        val hrChar = BluetoothGattCharacteristic(
-            HR_CHAR_UUID,
-            BluetoothGattCharacteristic.PROPERTY_NOTIFY,
-            BluetoothGattCharacteristic.PERMISSION_READ
-        ).apply {
-            addDescriptor(BluetoothGattDescriptor(CCCD_UUID,
-                BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE))
-        }
-        gattServer?.addService(
-            BluetoothGattService(HR_SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY)
-                .also { it.addCharacteristic(hrChar) }
-        )
-
-        Log.i(TAG, "GATT server set up — HRV service added after HR confirmed")
+        // Chain starts here: HR → (onServiceAdded) → HRV → (onServiceAdded) → BREATHING
+        gattServer?.addService(buildNotifyService(HR_SERVICE_UUID, HR_CHAR_UUID))
+        Log.i(TAG, "GATT server set up — starting HR→HRV→BREATHING service chain")
     }
+
+    private fun buildNotifyService(serviceUuid: UUID, charUuid: UUID): BluetoothGattService =
+        BluetoothGattService(serviceUuid, BluetoothGattService.SERVICE_TYPE_PRIMARY).also { svc ->
+            svc.addCharacteristic(
+                BluetoothGattCharacteristic(
+                    charUuid,
+                    BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+                    BluetoothGattCharacteristic.PERMISSION_READ
+                ).apply {
+                    addDescriptor(BluetoothGattDescriptor(CCCD_UUID,
+                        BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE))
+                }
+            )
+        }
 
     private fun startBleAdvertising() {
         val advertiser = bluetoothManager.adapter.bluetoothLeAdvertiser
@@ -258,8 +300,20 @@ class WearMonitoringService : Service() {
     private fun notifyHrv(hrv: Double) {
         val char = gattServer?.getService(HRV_SERVICE_UUID)?.getCharacteristic(HRV_CHAR_UUID) ?: return
         val tenths = (hrv * 10).toInt().coerceIn(0, 65535)
-        val value = byteArrayOf((tenths and 0xFF).toByte(), (tenths shr 8).toByte())
-        notifyChar(char, value)
+        notifyChar(char, byteArrayOf((tenths and 0xFF).toByte(), (tenths shr 8).toByte()))
+    }
+
+    private fun notifyBreathing(metrics: BreathingMetrics) {
+        val char = gattServer?.getService(BREATHING_SERVICE_UUID)?.getCharacteristic(BREATHING_CHAR_UUID) ?: return
+        // 6-byte packet: BR×10, BD×1000, BL×10 — each uint16 little-endian
+        val brTenths = (metrics.breathingRate   * 10).toInt().coerceIn(0, 65535)
+        val bdThou   = (metrics.breathingDepth  * 1000).toInt().coerceIn(0, 65535)
+        val blTenths = (metrics.breathingLength * 10).toInt().coerceIn(0, 65535)
+        notifyChar(char, byteArrayOf(
+            (brTenths and 0xFF).toByte(), (brTenths shr 8).toByte(),
+            (bdThou   and 0xFF).toByte(), (bdThou   shr 8).toByte(),
+            (blTenths and 0xFF).toByte(), (blTenths shr 8).toByte()
+        ))
     }
 
     private fun notifyChar(char: BluetoothGattCharacteristic, value: ByteArray) {
@@ -279,20 +333,25 @@ class WearMonitoringService : Service() {
         Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle("PTSD Monitor")
-            .setContentText("Measuring HR + HRV")
+            .setContentText("Measuring HR + HRV + Breathing")
             .setOngoing(true)
             .build()
 
     companion object {
-        private const val CHANNEL_ID = "wear_monitoring"
+        private const val CHANNEL_ID      = "wear_monitoring"
         private const val NOTIFICATION_ID = 1001
-        const val ACTION_START_BROADCAST = "com.ptsdalert.wear.START_BROADCAST"
-        const val ACTION_STOP_BROADCAST  = "com.ptsdalert.wear.STOP_BROADCAST"
-        const val ACTION_FAKE_HR         = "com.ptsdalert.wear.FAKE_HR"
-        const val ACTION_FAKE_HRV        = "com.ptsdalert.wear.FAKE_HRV"
-        const val EXTRA_FAKE_HR          = "fake_hr"
-        const val EXTRA_FAKE_HRV         = "fake_hrv"
-        @Volatile var lastHr: Int? = null
-        @Volatile var lastHrv: Double? = null
+        const val ACTION_START_BROADCAST  = "com.ptsdalert.wear.START_BROADCAST"
+        const val ACTION_STOP_BROADCAST   = "com.ptsdalert.wear.STOP_BROADCAST"
+        const val ACTION_FAKE_HR          = "com.ptsdalert.wear.FAKE_HR"
+        const val ACTION_FAKE_HRV         = "com.ptsdalert.wear.FAKE_HRV"
+        const val ACTION_FAKE_BREATHING   = "com.ptsdalert.wear.FAKE_BREATHING"
+        const val EXTRA_FAKE_HR           = "fake_hr"
+        const val EXTRA_FAKE_HRV          = "fake_hrv"
+        const val EXTRA_FAKE_BR           = "fake_br"
+        @Volatile var lastHr: Int?             = null
+        @Volatile var lastHrv: Double?          = null
+        @Volatile var lastBreathingRate: Float?  = null
+        @Volatile var lastBreathingDepth: Float? = null
+        @Volatile var lastBreathingLength: Float? = null
     }
 }

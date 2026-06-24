@@ -26,9 +26,14 @@ class MainActivity : Activity() {
     private lateinit var btnNormalHrv: Button
     private lateinit var btnLowHrv: Button
     private lateinit var btnRealHrv: Button
+    private lateinit var btnNormalBreathing: Button
+    private lateinit var btnFastBreathing: Button
+    private lateinit var btnRealBreathing: Button
+    private lateinit var breathingText: TextView
     private var broadcasting = false
     private var activeFakeHr: Int? = null
     private var activeFakeHrv: Double? = null
+    private var activeFakeBr: Float? = null
     private val handler = Handler(Looper.getMainLooper())
 
     private val poller = object : Runnable {
@@ -47,6 +52,11 @@ class MainActivity : Activity() {
                 activeFakeHrv != null && activeFakeHrv!! < 50 -> Color.rgb(255, 140, 0)
                 else -> Color.LTGRAY
             })
+            val br = activeFakeBr ?: WearMonitoringService.lastBreathingRate
+            val bd = WearMonitoringService.lastBreathingDepth
+            val bl = WearMonitoringService.lastBreathingLength
+            breathingText.text = if (br != null) "BR:${"%.1f".format(br)} BD:${"%.2f".format(bd ?: 0f)} BL:${"%.1f".format(bl ?: 0f)}"
+                                 else "Breathing --"
             handler.postDelayed(this, 1000)
         }
     }
@@ -65,6 +75,12 @@ class MainActivity : Activity() {
             setTextColor(Color.LTGRAY)
             gravity = Gravity.CENTER
             text = "HRV --"
+        }
+        breathingText = TextView(this).apply {
+            textSize = 16f
+            setTextColor(Color.LTGRAY)
+            gravity = Gravity.CENTER
+            text = "Breathing --"
         }
         broadcastButton = Button(this).apply {
             textSize = 13f
@@ -121,12 +137,34 @@ class MainActivity : Activity() {
             setBackgroundColor(Color.DKGRAY)
             setOnClickListener { clearFakeHrv() }
         }
+        btnNormalBreathing = Button(this).apply {
+            text = "Normal BR (15/min)"
+            textSize = 12f
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.rgb(0, 80, 100))
+            setOnClickListener { sendFakeBreathing(15f) }
+        }
+        btnFastBreathing = Button(this).apply {
+            text = "Fast BR (25/min)"
+            textSize = 12f
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.rgb(100, 60, 0))
+            setOnClickListener { sendFakeBreathing(25f) }
+        }
+        btnRealBreathing = Button(this).apply {
+            text = "Back to Real BR"
+            textSize = 12f
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.DKGRAY)
+            setOnClickListener { clearFakeBreathing() }
+        }
 
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             addView(hrText)
             addView(hrvText)
+            addView(breathingText)
             addView(broadcastButton)
             addView(btnHigh)
             addView(btnLow)
@@ -135,6 +173,9 @@ class MainActivity : Activity() {
             addView(btnNormalHrv)
             addView(btnLowHrv)
             addView(btnRealHrv)
+            addView(btnNormalBreathing)
+            addView(btnFastBreathing)
+            addView(btnRealBreathing)
         }
         setContentView(ScrollView(this).apply { addView(layout) })
 
@@ -201,6 +242,26 @@ class MainActivity : Activity() {
         startService(Intent(this, WearMonitoringService::class.java).apply {
             action = WearMonitoringService.ACTION_FAKE_HRV
             putExtra(WearMonitoringService.EXTRA_FAKE_HRV, -1.0)
+        })
+    }
+
+    private fun sendFakeBreathing(br: Float) {
+        activeFakeBr = br
+        btnNormalBreathing.setBackgroundColor(if (br == 15f) Color.rgb(0, 160, 200) else Color.rgb(0, 80, 100))
+        btnFastBreathing.setBackgroundColor(if (br == 25f) Color.rgb(200, 120, 0) else Color.rgb(100, 60, 0))
+        startService(Intent(this, WearMonitoringService::class.java).apply {
+            action = WearMonitoringService.ACTION_FAKE_BREATHING
+            putExtra(WearMonitoringService.EXTRA_FAKE_BR, br)
+        })
+    }
+
+    private fun clearFakeBreathing() {
+        activeFakeBr = null
+        btnNormalBreathing.setBackgroundColor(Color.rgb(0, 80, 100))
+        btnFastBreathing.setBackgroundColor(Color.rgb(100, 60, 0))
+        startService(Intent(this, WearMonitoringService::class.java).apply {
+            action = WearMonitoringService.ACTION_FAKE_BREATHING
+            putExtra(WearMonitoringService.EXTRA_FAKE_BR, -1f)
         })
     }
 
